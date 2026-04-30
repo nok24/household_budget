@@ -46,13 +46,17 @@ export default function Transactions() {
   const budgetConfig = useBudgetStore((s) => s.config);
   const allApplied = useLiveQuery(() => getAllTransactionsApplied(), [], []);
   const allRaw = useLiveQuery(() => db.transactions.toArray(), [], []);
-  const months = useLiveQuery(async () => {
-    const set = new Set<string>();
-    await db.transactions.each((t) => {
-      if (t.yearMonth) set.add(t.yearMonth);
-    });
-    return [...set].sort().reverse();
-  }, [], []);
+  const months = useLiveQuery(
+    async () => {
+      const set = new Set<string>();
+      await db.transactions.each((t) => {
+        if (t.yearMonth) set.add(t.yearMonth);
+      });
+      return [...set].sort().reverse();
+    },
+    [],
+    [],
+  );
 
   const rawById = useMemo(() => {
     const m = new Map<string, DbTransaction>();
@@ -135,12 +139,9 @@ export default function Transactions() {
         <h1 className="text-[22px] font-medium leading-tight">
           取引一覧{' '}
           <span className="text-[13px] text-ink-40 font-normal ml-2">
-            {filters.yearMonth || '全期間'} ·{' '}
-            {sortedRows.length.toLocaleString()}件
+            {filters.yearMonth || '全期間'} · {sortedRows.length.toLocaleString()}件
             {sortedRows.length !== allApplied.length && (
-              <span className="text-ink-40">
-                （全{allApplied.length.toLocaleString()}件中）
-              </span>
+              <span className="text-ink-40">（全{allApplied.length.toLocaleString()}件中）</span>
             )}
           </span>
         </h1>
@@ -187,9 +188,7 @@ export default function Transactions() {
           <input
             type="checkbox"
             checked={filters.hideTransfers}
-            onChange={(e) =>
-              setFilters({ ...filters, hideTransfers: e.target.checked })
-            }
+            onChange={(e) => setFilters({ ...filters, hideTransfers: e.target.checked })}
             className="accent-accent"
           />
           振替を非表示
@@ -198,9 +197,7 @@ export default function Transactions() {
           <input
             type="checkbox"
             checked={filters.hideNonTarget}
-            onChange={(e) =>
-              setFilters({ ...filters, hideNonTarget: e.target.checked })
-            }
+            onChange={(e) => setFilters({ ...filters, hideNonTarget: e.target.checked })}
             className="accent-accent"
           />
           計算対象外を非表示
@@ -216,10 +213,7 @@ export default function Transactions() {
           <span>
             差引{' '}
             <span
-              className={cn(
-                'font-medium',
-                summary.balance >= 0 ? 'text-accent' : 'text-rose-700',
-              )}
+              className={cn('font-medium', summary.balance >= 0 ? 'text-accent' : 'text-rose-700')}
             >
               {summary.balance >= 0 ? '+' : '−'}
               {formatYen(Math.abs(summary.balance))}
@@ -286,7 +280,7 @@ export default function Transactions() {
                     onClick={() => setEditTarget({ applied: t, raw })}
                     className={cn(
                       'absolute top-0 left-0 w-full text-left grid grid-cols-[90px_1fr_140px_120px_80px_130px] gap-3 items-center px-[18px] text-xs tabular-nums hover:bg-canvas transition-colors',
-                      'border-b border-line/60',
+                      'border-b border-line',
                       !t.isTarget && 'opacity-50',
                     )}
                     style={{
@@ -295,8 +289,7 @@ export default function Transactions() {
                     }}
                   >
                     <div className="text-ink-60 whitespace-nowrap">
-                      {d.format('M/D')}{' '}
-                      <span className="text-ink-40 ml-0.5">{dow}</span>
+                      {d.format('M/D')} <span className="text-ink-40 ml-0.5">{dow}</span>
                     </div>
                     <div className="truncate">
                       {t.contentName}
@@ -361,13 +354,7 @@ export default function Transactions() {
   );
 }
 
-function SignToggle({
-  value,
-  onChange,
-}: {
-  value: SignFilter;
-  onChange: (v: SignFilter) => void;
-}) {
+function SignToggle({ value, onChange }: { value: SignFilter; onChange: (v: SignFilter) => void }) {
   const items: { value: SignFilter; label: string }[] = [
     { value: 'all', label: 'すべて' },
     { value: 'expense', label: '支出' },
@@ -427,8 +414,7 @@ function MemberToggle({
             <span
               className="w-1.5 h-1.5 rounded-full"
               style={{
-                background:
-                  memberId === m.id ? 'rgba(255,255,255,0.7)' : m.color,
+                background: memberId === m.id ? 'rgba(255,255,255,0.7)' : m.color,
               }}
             />
           )}

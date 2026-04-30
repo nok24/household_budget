@@ -3,11 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuthStore } from '@/store/auth';
 import { useBudgetStore } from '@/store/budget';
 import { getDistinctAccounts } from '@/lib/aggregate';
-import {
-  inferMemberId,
-  MEMBER_PRESET_COLORS,
-  newMember,
-} from '@/lib/members';
+import { inferMemberId, MEMBER_PRESET_COLORS, newMember } from '@/lib/members';
 import { cn } from '@/lib/utils';
 import type { MemberDef } from '@/types';
 
@@ -78,9 +74,7 @@ export default function MemberEditor() {
     if (t) await save(t);
   }
 
-  const unassigned = accounts.filter(
-    (a) => !accountAssignments.get(a.name),
-  );
+  const unassigned = accounts.filter((a) => !accountAssignments.get(a.name));
 
   return (
     <div className="space-y-5">
@@ -89,9 +83,7 @@ export default function MemberEditor() {
           <MemberCard
             key={m.id}
             member={m}
-            assignedAccounts={accounts.filter(
-              (a) => accountAssignments.get(a.name) === m.id,
-            )}
+            assignedAccounts={accounts.filter((a) => accountAssignments.get(a.name) === m.id)}
             canDelete={config.members.length > 1}
             onChange={(patch) => updateMember(idx, patch)}
             onDelete={() => removeMember(idx)}
@@ -111,9 +103,7 @@ export default function MemberEditor() {
           <div className="text-xs font-medium tracking-wider text-ink-70">
             未割当の口座（{unassigned.length}件）
           </div>
-          <p className="text-[11px] text-ink-40">
-            クリックして任意のメンバーに振り分けます。
-          </p>
+          <p className="text-[11px] text-ink-40">クリックして任意のメンバーに振り分けます。</p>
           <div className="flex flex-wrap gap-1.5">
             {unassigned.map((a) => (
               <UnassignedAccountChip
@@ -227,7 +217,7 @@ function MemberCard({
       </label>
 
       {assignedAccounts.length > 0 && (
-        <div className="space-y-1 pt-2 border-t border-line/60">
+        <div className="space-y-1 pt-2 border-t border-line">
           <div className="text-[10px] tracking-wider text-ink-40">
             マッチしている口座（{assignedAccounts.length}件）
           </div>
@@ -287,7 +277,7 @@ function UnassignedAccountChip({
           'text-[11px] px-2 py-1 rounded-sm border transition-colors',
           open
             ? 'bg-accent/10 border-accent/40 text-ink'
-            : 'bg-canvas border-line/60 hover:bg-line/30',
+            : 'bg-canvas border-line hover:bg-line/30',
         )}
       >
         <span className="font-medium">{account}</span>
@@ -309,10 +299,7 @@ function UnassignedAccountChip({
               }}
               className="text-xs px-3 py-1.5 text-left hover:bg-canvas flex items-center gap-2 whitespace-nowrap"
             >
-              <span
-                className="w-2 h-2 rounded-full shrink-0"
-                style={{ background: m.color }}
-              />
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: m.color }} />
               {m.name} に追加
             </button>
           ))}

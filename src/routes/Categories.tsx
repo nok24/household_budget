@@ -19,16 +19,8 @@ import { cn, formatYen, formatPct } from '@/lib/utils';
 
 export default function Categories() {
   const selectedMonth = useUiStore((s) => s.selectedMonth);
-  const breakdown = useLiveQuery(
-    () => getCategoryBreakdown(selectedMonth),
-    [selectedMonth],
-    [],
-  );
-  const summary = useLiveQuery(
-    () => getMonthSummary(selectedMonth),
-    [selectedMonth],
-    null,
-  );
+  const breakdown = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
+  const summary = useLiveQuery(() => getMonthSummary(selectedMonth), [selectedMonth], null);
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const activeCategory = selectedCategory ?? breakdown[0]?.name ?? null;
@@ -47,10 +39,7 @@ export default function Categories() {
 
       {/* 上段: 大ドーナツ + 推移テーブル */}
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
-        <DonutCard
-          breakdown={breakdown}
-          totalExpense={summary?.expense ?? 0}
-        />
+        <DonutCard breakdown={breakdown} totalExpense={summary?.expense ?? 0} />
         <CategoryTable
           breakdown={breakdown}
           totalExpense={summary?.expense ?? 0}
@@ -88,12 +77,7 @@ function DonutCard({
       <div className="text-[11px] tracking-[0.1em] text-ink-40 self-start mb-4 font-medium">
         支出構成
       </div>
-      <CategoryDonut
-        data={breakdown}
-        total={totalExpense}
-        size={220}
-        thickness={26}
-      />
+      <CategoryDonut data={breakdown} total={totalExpense} size={220} thickness={26} />
       {top && (
         <div className="mt-3.5 text-[11px] text-ink-60 text-center">
           最大カテゴリ:{' '}
@@ -135,22 +119,22 @@ function CategoryTable({
         <span className="text-right">予算比</span>
       </div>
       {breakdown.length === 0 ? (
-        <div className="py-8 text-center text-sm text-ink-60">
-          支出データがありません
-        </div>
+        <div className="py-8 text-center text-sm text-ink-60">支出データがありません</div>
       ) : (
-        breakdown.slice(0, 8).map((c) => (
-          <CategoryRow
-            key={c.name}
-            category={c.name}
-            amount={c.amount}
-            totalExpense={totalExpense}
-            budget={getMonthBudget(config, selectedMonth, c.name)}
-            isActive={c.name === activeCategory}
-            onClick={() => onSelect(c.name)}
-            selectedMonth={selectedMonth}
-          />
-        ))
+        breakdown
+          .slice(0, 8)
+          .map((c) => (
+            <CategoryRow
+              key={c.name}
+              category={c.name}
+              amount={c.amount}
+              totalExpense={totalExpense}
+              budget={getMonthBudget(config, selectedMonth, c.name)}
+              isActive={c.name === activeCategory}
+              onClick={() => onSelect(c.name)}
+              selectedMonth={selectedMonth}
+            />
+          ))
       )}
     </section>
   );
@@ -192,7 +176,7 @@ function CategoryRow({
       type="button"
       onClick={onClick}
       className={cn(
-        'w-full text-left grid grid-cols-[24px_140px_60px_1fr_90px_70px] gap-2.5 items-center py-3 border-b border-line/60 last:border-0 text-[12px] hover:bg-canvas transition-colors',
+        'w-full text-left grid grid-cols-[24px_140px_60px_1fr_90px_70px] gap-2.5 items-center py-3 border-b border-line last:border-0 text-[12px] hover:bg-canvas transition-colors',
         isActive && 'bg-accent/[0.04]',
       )}
     >
@@ -203,13 +187,14 @@ function CategoryRow({
         {category.charAt(0)}
       </span>
       <span className="truncate">{category}</span>
-      <span className="text-right tabular-nums text-ink-60">
-        {formatPct(occupancy, 0)}
-      </span>
-      <Sparkline data={sparkData.length > 0 ? sparkData : [0, 0]} width={180} height={28} accent={color} />
-      <span className="text-right tabular-nums font-medium">
-        {formatYen(amount)}
-      </span>
+      <span className="text-right tabular-nums text-ink-60">{formatPct(occupancy, 0)}</span>
+      <Sparkline
+        data={sparkData.length > 0 ? sparkData : [0, 0]}
+        width={180}
+        height={28}
+        accent={color}
+      />
+      <span className="text-right tabular-nums font-medium">{formatYen(amount)}</span>
       <span className={cn('text-right tabular-nums text-[11px] font-medium', budgetColor)}>
         {budget > 0 ? formatPct(budgetPct, 0) : '—'}
       </span>
@@ -253,8 +238,8 @@ function CategoryDetail({
   // 前月比
   const thisIdx = trend.length - 1;
   const prevIdx = trend.length - 2;
-  const thisAmt = thisIdx >= 0 ? trend[thisIdx]?.amount ?? 0 : 0;
-  const prevAmt = prevIdx >= 0 ? trend[prevIdx]?.amount ?? 0 : 0;
+  const thisAmt = thisIdx >= 0 ? (trend[thisIdx]?.amount ?? 0) : 0;
+  const prevAmt = prevIdx >= 0 ? (trend[prevIdx]?.amount ?? 0) : 0;
   const delta = thisAmt - prevAmt;
   const deltaPct = prevAmt > 0 ? (delta / prevAmt) * 100 : null;
 
@@ -303,16 +288,14 @@ function CategoryDetail({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* 店舗別 TOP */}
         <div>
-          <div className="text-[10px] tracking-[0.1em] text-ink-40 mb-2.5">
-            店舗別 TOP
-          </div>
+          <div className="text-[10px] tracking-[0.1em] text-ink-40 mb-2.5">店舗別 TOP</div>
           {stores.length === 0 ? (
             <p className="text-xs text-ink-60">データなし</p>
           ) : (
             stores.map((s) => (
               <div
                 key={s.name}
-                className="grid grid-cols-[1fr_auto_auto] gap-2.5 py-1.5 text-[11px] items-baseline border-b border-line/60 last:border-0"
+                className="grid grid-cols-[1fr_auto_auto] gap-2.5 py-1.5 text-[11px] items-baseline border-b border-line last:border-0"
               >
                 <span className="truncate">{s.name}</span>
                 <span className="text-ink-40 text-[10px]">{s.count}件</span>
@@ -326,15 +309,10 @@ function CategoryDetail({
 
         {/* 曜日別 平均支出 */}
         <div>
-          <div className="text-[10px] tracking-[0.1em] text-ink-40 mb-2.5">
-            曜日別 平均支出
-          </div>
+          <div className="text-[10px] tracking-[0.1em] text-ink-40 mb-2.5">曜日別 平均支出</div>
           <div className="flex items-end gap-1.5 h-[120px] pb-[18px] relative">
             {dowAverage.map((d) => (
-              <div
-                key={d.dow}
-                className="flex-1 relative h-full flex flex-col justify-end"
-              >
+              <div key={d.dow} className="flex-1 relative h-full flex flex-col justify-end">
                 <div
                   className="bg-accent rounded-t-[2px] opacity-85"
                   style={{ height: `${(d.average / dowMax) * 100}%` }}
@@ -360,9 +338,7 @@ function CategoryDetail({
 
         {/* 12ヶ月の推移 */}
         <div>
-          <div className="text-[10px] tracking-[0.1em] text-ink-40 mb-2.5">
-            12ヶ月の推移
-          </div>
+          <div className="text-[10px] tracking-[0.1em] text-ink-40 mb-2.5">12ヶ月の推移</div>
           <Sparkline
             data={trend.length > 0 ? trend.map((t) => t.amount) : [0, 0]}
             width={260}
@@ -374,9 +350,8 @@ function CategoryDetail({
             <span>{trend[trend.length - 1]?.yearMonth ?? selectedMonth}</span>
           </div>
           <div className="mt-3 text-[11px] text-ink-60 tabular-nums">
-            平均{' '}
-            <span className="text-ink font-medium">{formatYen(Math.round(stats.avg))}</span>{' '}
-            · 標準偏差 ±{formatYen(Math.round(stats.std))}
+            平均 <span className="text-ink font-medium">{formatYen(Math.round(stats.avg))}</span> ·
+            標準偏差 ±{formatYen(Math.round(stats.std))}
           </div>
         </div>
       </div>

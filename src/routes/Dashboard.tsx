@@ -33,11 +33,7 @@ export default function Dashboard() {
     <div className="space-y-5">
       <DashboardHeader folderId={folder?.id ?? null} selectedMonth={selectedMonth} />
 
-      {!folder ? (
-        <FolderEmpty />
-      ) : (
-        <DashboardBody selectedMonth={selectedMonth} />
-      )}
+      {!folder ? <FolderEmpty /> : <DashboardBody selectedMonth={selectedMonth} />}
     </div>
   );
 }
@@ -103,9 +99,7 @@ function DashboardHeader({
         <h1 className="text-[22px] font-medium leading-tight tracking-[-0.01em]">
           {dayjs(`${selectedMonth}-01`).format('YYYY年 M月')}
         </h1>
-        {folderName && (
-          <div className="text-[11px] text-ink-40 mt-1.5">{folderName}</div>
-        )}
+        {folderName && <div className="text-[11px] text-ink-40 mt-1.5">{folderName}</div>}
       </div>
       {folderId && (
         <div className="flex items-center gap-2">
@@ -141,26 +135,14 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
   const totalCount = useLiveQuery(() => db.transactions.count(), [], 0);
   const budgetConfig = useBudgetStore((s) => s.config);
 
-  const summary = useLiveQuery(
-    () => getMonthSummary(selectedMonth),
-    [selectedMonth],
-    null,
-  );
+  const summary = useLiveQuery(() => getMonthSummary(selectedMonth), [selectedMonth], null);
   const prevSummary = useLiveQuery(
     () => getMonthSummary(shiftMonth(selectedMonth, -1)),
     [selectedMonth],
     null,
   );
-  const trend = useLiveQuery(
-    () => getMonthlyTrend(selectedMonth, 12),
-    [selectedMonth],
-    [],
-  );
-  const categories = useLiveQuery(
-    () => getCategoryBreakdown(selectedMonth),
-    [selectedMonth],
-    [],
-  );
+  const trend = useLiveQuery(() => getMonthlyTrend(selectedMonth, 12), [selectedMonth], []);
+  const categories = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
   const recent = useLiveQuery(
     () => getRecentTransactionsForMonth(selectedMonth, 7),
     [selectedMonth],
@@ -189,9 +171,7 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
       ? ((summary.income - prevSummary.income) / prevSummary.income) * 100
       : null;
   const savingsRate =
-    summary && summary.income > 0
-      ? (summary.balance / summary.income) * 100
-      : null;
+    summary && summary.income > 0 ? (summary.balance / summary.income) * 100 : null;
 
   return (
     <div className="space-y-4">
@@ -216,9 +196,7 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
           }
           delta={expDelta}
           progress={
-            totalBudget > 0 && summary
-              ? { current: summary.expense, max: totalBudget }
-              : undefined
+            totalBudget > 0 && summary ? { current: summary.expense, max: totalBudget } : undefined
           }
         />
         <KpiCard
@@ -247,10 +225,12 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
       <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-4">
         <section className="card p-5">
           <CardHead label="収支推移 · 直近12ヶ月">
-            <Legend items={[
-              { color: '#3F5A4A', label: '収入' },
-              { color: 'rgba(26,26,26,0.18)', label: '支出' },
-            ]} />
+            <Legend
+              items={[
+                { color: '#3F5A4A', label: '収入' },
+                { color: 'rgba(26,26,26,0.18)', label: '支出' },
+              ]}
+            />
           </CardHead>
           <TrendBarChart data={trend} selectedMonth={selectedMonth} height={180} />
         </section>
@@ -404,11 +384,7 @@ function Legend({ items }: { items: { color: string; label: string }[] }) {
 
 function BudgetUsageCard({ selectedMonth }: { selectedMonth: string }) {
   const config = useBudgetStore((s) => s.config);
-  const breakdown = useLiveQuery(
-    () => getCategoryBreakdown(selectedMonth),
-    [selectedMonth],
-    [],
-  );
+  const breakdown = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
 
   // 予算が設定されているカテゴリ + 使用額があるカテゴリを order に従って表示
   const rows = (() => {
@@ -495,7 +471,7 @@ function RecentTransactionsCard({
                 key={t.id}
                 className={cn(
                   'grid grid-cols-[40px_1fr_auto_auto] gap-2.5 py-[7px] items-center text-[11px] tabular-nums',
-                  i < rows.length - 1 && 'border-b border-line/60',
+                  i < rows.length - 1 && 'border-b border-line',
                 )}
               >
                 <span className="text-ink-40">{dayjs(t.date).format('M/D')}</span>
