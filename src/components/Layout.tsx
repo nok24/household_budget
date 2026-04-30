@@ -8,6 +8,7 @@ import { useFolderStore } from '@/store/folder';
 import { useOverridesStore } from '@/store/overrides';
 import { useSyncStore } from '@/store/sync';
 import { getLastSyncedAt } from '@/lib/sync';
+import { syncAssetFolder } from '@/lib/assetSync';
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'ダッシュボード' },
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
 export default function Layout() {
   const hydrate = useSyncStore((s) => s.hydrate);
   const folder = useFolderStore((s) => s.folder);
+  const assetFolder = useFolderStore((s) => s.assetFolder);
   const accessToken = useAuthStore((s) => s.accessToken);
   const ensureFreshToken = useAuthStore((s) => s.ensureFreshToken);
   const budgetConfig = useBudgetStore((s) => s.config);
@@ -65,6 +67,26 @@ export default function Layout() {
       cancelled = true;
     };
   }, [folder, accessToken, overridesHydrated, ensureFreshToken, hydrateOverrides]);
+
+  // 資産フォルダ（任意）が設定されていて、まだローカルに何も無いときだけ初回自動同期。
+  // 2回目以降や差分取り込みは、資産CSVが小さく取り込みコストが軽いので mount のたびに走らせる。
+  useEffect(() => {
+    if (!assetFolder || !accessToken) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const t = (await ensureFreshToken()) ?? accessToken;
+        if (!t || cancelled) return;
+        await syncAssetFolder(t, assetFolder.id);
+      } catch (e) {
+        console.error('[asset-sync] failed', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetFolder?.id, accessToken]);
 
   return (
     <div className="min-h-screen grid grid-cols-[200px_1fr] max-md:grid-cols-1">

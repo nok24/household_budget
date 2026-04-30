@@ -55,6 +55,7 @@ export interface PickedFolder {
 export async function pickFolder(opts: {
   accessToken: string;
   apiKey: string;
+  title?: string;
 }): Promise<PickedFolder | null> {
   await loadPickerLibrary();
   const picker = window.google?.picker;
@@ -71,7 +72,7 @@ export async function pickFolder(opts: {
       .setOAuthToken(opts.accessToken)
       .setDeveloperKey(opts.apiKey)
       .setOrigin(window.location.protocol + '//' + window.location.host)
-      .setTitle('家計簿フォルダを選択')
+      .setTitle(opts.title ?? '家計簿フォルダを選択')
       .enableFeature(picker.Feature.NAV_HIDDEN)
       .setCallback((data: PickerCallbackData) => {
         if (data.action === 'picked') {
