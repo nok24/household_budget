@@ -6,11 +6,11 @@
 
 ### 採用しなかった選択肢
 
-| 案 | 不採用理由 |
-|---|---|
-| Cloudflare D1 / Supabase などのクラウドDB | 家計データを別サービスに複製したくない |
-| Electron / Docker のローカルアプリ | 夫(Mac) + 妻(Windows) の2環境セットアップ + 同期機構が重い |
-| 自宅サーバー（NAS） | 設置・運用負荷が高い、外出先からアクセスしにくい |
+| 案                                        | 不採用理由                                                 |
+| ----------------------------------------- | ---------------------------------------------------------- |
+| Cloudflare D1 / Supabase などのクラウドDB | 家計データを別サービスに複製したくない                     |
+| Electron / Docker のローカルアプリ        | 夫(Mac) + 妻(Windows) の2環境セットアップ + 同期機構が重い |
+| 自宅サーバー（NAS）                       | 設置・運用負荷が高い、外出先からアクセスしにくい           |
 
 採用案（静的SPA + Drive 直接アクセス）は、**Drive 1箇所にデータが集中** + **インフラ運用ゼロ** を両立できるのが決め手。
 
@@ -23,22 +23,27 @@
 当初は `drive.file` 単体で始めたが、**フォルダを Picker で選んでも配下ファイルを `files.list` で列挙できない** Google API の仕様で詰まった（`drive.file` は明示的に Picker 選択 / アプリ作成したファイルしか見えない）。
 
 採用: `openid email profile drive.readonly drive.file`
+
 - `drive.readonly`: 既存CSVの列挙・読み取り
 - `drive.file`: アプリが作成する `budget.json` / `overrides.json` の書き込み（drive.readonly では書けない）
 
 ### 2.2 トークン管理：メモリのみ
 
 - アクセストークンは Zustand の memory store のみ。`localStorage` / `sessionStorage` に置かない（XSS耐性）
-- `localStorage` には `household.auth.has-been-authed` フラグだけ。「過去にログイン成功あり」を示すフラグ。これが立ってる時のみ silent re-auth を試行（無駄なポップアップ防止）
+- `localStorage` には次の2つだけ:
+  - `household.auth.has-been-authed`: 「過去にログイン成功あり」フラグ。立ってる時のみ silent re-auth を試行（無駄なポップアップ防止）
+  - `household.auth.last-email`: 最後にログインしたメールアドレス。silent re-auth の `loginHint` に使い、複数 Google アカウントが Chrome に登録されていてもアカウントチューザが出ないようにする。トークンではないので XSS で漏れても被害は実質無し
+- silent re-auth は `prompt: 'none'` で実行（UI を一切出さない）。空文字列 `''` だと Google が必要に応じてアカウントチューザを出してしまうので使わない
 - リロード時はメモリクリア → silent re-auth が走る → Google のセッションが生きてれば自動復帰
+- リロード時に一瞬ポップアップウィンドウが開閉するのは GIS `initTokenClient` の仕様（OAuth ハンドシェイクのため popup 自体は必ず開く）。`prompt: 'none'` で UI 描画はスキップしているので、視覚的には一瞬光るだけ。これを完全に消すには iframe ベースの自前 OAuth 実装か Authorization Code + PKCE + バックエンドが必要で、家族2名運用ではコストに見合わないので受容している
 
 ### 2.3 Drive 同期戦略
 
-| ファイル | Drive 上 | ローカル | 同期方向 | タイミング |
-|---|---|---|---|---|
-| `*.csv` | MFが書く | IndexedDB `transactions` | Drive → ローカル | 起動時 + 手動「同期」ボタン。`modifiedTime` 比較で増分のみ |
-| `budget.json` | アプリが作る | Zustand `budget.config` | 双方向 | 起動時に Drive→Z, 編集時に Z→Drive (即時) |
-| `overrides.json` | アプリが作る | IndexedDB `overrides` | 双方向 | 起動時に Drive→IDB, 編集時に IDB→Drive (1.5秒デバウンス) |
+| ファイル         | Drive 上     | ローカル                 | 同期方向         | タイミング                                                 |
+| ---------------- | ------------ | ------------------------ | ---------------- | ---------------------------------------------------------- |
+| `*.csv`          | MFが書く     | IndexedDB `transactions` | Drive → ローカル | 起動時 + 手動「同期」ボタン。`modifiedTime` 比較で増分のみ |
+| `budget.json`    | アプリが作る | Zustand `budget.config`  | 双方向           | 起動時に Drive→Z, 編集時に Z→Drive (即時)                  |
+| `overrides.json` | アプリが作る | IndexedDB `overrides`    | 双方向           | 起動時に Drive→IDB, 編集時に IDB→Drive (1.5秒デバウンス)   |
 
 **競合解決は最後勝ち**。家族2人なので、楽観ロックや merge ロジックは入れていない。短時間に同時編集すると片方が消える可能性はあるが、運用上はほぼ起こらない想定。
 
@@ -58,6 +63,7 @@ meta        : key(主), value
 ### 2.5 集計ロジック
 
 すべて `src/lib/aggregate.ts` に集約。
+
 - 集計から除外されるレコード: `isTransfer === true` または `isTarget === false`
 - `applyOverridesToRows()` で IndexedDB の override を transactions に merge してから集計
 - カテゴリ並び順は `budget.json.categoryOrder` で固定。未掲載のカテゴリは末尾に名前順
@@ -87,22 +93,23 @@ if (!items || items.length === 0) return null;
 
 ## 3. 画面別の機能と未実装事項
 
-| 画面 | 状態 | 残タスク |
-|---|---|---|
-| `/dashboard` | ✅ 実装済み | （なし） |
-| `/transactions` | ✅ 実装済み（仮想スクロール、検索、フィルタ、上書きモーダル）| （なし） |
-| `/categories` | ✅ 実装済み（ドーナツ、推移テーブル、店舗別/曜日別/12ヶ月推移）| 「年次」「比較」タブはモック上にあるが未実装 |
-| `/budget` | ✅ 実装済み（カテゴリ別予算、進捗、超過アラート、月単位上書き）| （なし） |
-| `/settings` | ✅ 実装済み（フォルダ、メンバー、カテゴリ並び順、データ診断、キャッシュリセット）| （なし） |
-| `/report` | ⏳ placeholder のみ | 後段。`/categories` の「年次」「比較」と統合する案あり |
-| オンボーディング | △ AuthGate と Dashboard の FolderEmpty で代替 | 専用画面は未実装。今のフローで十分動く |
-| 未認可ユーザ | ✅ AuthGate の `unauthorized` 状態でメッセージ表示 | （なし） |
+| 画面             | 状態                                                                              | 残タスク                                               |
+| ---------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `/dashboard`     | ✅ 実装済み                                                                       | （なし）                                               |
+| `/transactions`  | ✅ 実装済み（仮想スクロール、検索、フィルタ、上書きモーダル）                     | （なし）                                               |
+| `/categories`    | ✅ 実装済み（ドーナツ、推移テーブル、店舗別/曜日別/12ヶ月推移）                   | 「年次」「比較」タブはモック上にあるが未実装           |
+| `/budget`        | ✅ 実装済み（カテゴリ別予算、進捗、超過アラート、月単位上書き）                   | （なし）                                               |
+| `/settings`      | ✅ 実装済み（フォルダ、メンバー、カテゴリ並び順、データ診断、キャッシュリセット） | （なし）                                               |
+| `/report`        | ⏳ placeholder のみ                                                               | 後段。`/categories` の「年次」「比較」と統合する案あり |
+| オンボーディング | △ AuthGate と Dashboard の FolderEmpty で代替                                     | 専用画面は未実装。今のフローで十分動く                 |
+| 未認可ユーザ     | ✅ AuthGate の `unauthorized` 状態でメッセージ表示                                | （なし）                                               |
 
 ---
 
 ## 4. 残タスク（Step 13）
 
 ### 必須
+
 - [ ] **Cloudflare Pages デプロイ**
   - GitHub プライベートリポ作成 → push
   - Cloudflare Dashboard → Pages → GitHub 連携
@@ -112,6 +119,7 @@ if (!items || items.length === 0) return null;
 - [ ] **本番 URL での実機動作確認**（夫の Mac、妻の Windows）
 
 ### 推奨
+
 - [ ] **コード分割**（現状メインバンドル ~900KB）
   - Recharts と Categories.tsx を `React.lazy` で分離
   - dnd-kit を Settings 内だけで読み込む
@@ -121,6 +129,7 @@ if (!items || items.length === 0) return null;
 - [ ] **Lighthouse 計測**: A 評価を目指す（CSP・headers は既に設定済み、PWA 化は任意）
 
 ### 任意
+
 - [ ] **メンバー別支出のダッシュボード表示**（variant-a の世帯メンバー枠の本実装）
 - [ ] **`/report` の年次・比較タブ実装**
 - [ ] **PWA 化**（オフライン参照、ホーム画面追加）
@@ -132,12 +141,14 @@ if (!items || items.length === 0) return null;
 ## 5. デプロイ手順（Cloudflare Pages）
 
 ### 前提
+
 - Cloudflare アカウント（無料プランで OK）
 - GitHub アカウント
 
 ### 手順
 
 1. **GitHub プライベートリポ作成 + push**
+
    ```bash
    gh repo create household-budget --private --source=. --push
    # or
@@ -198,13 +209,13 @@ VITE_ALLOWED_EMAILS=nok.24.eva.05@gmail.com,mieko.kawamura.mail@gmail.com
 
 ## 7. データ参照先
 
-| 種別 | 場所 |
-|---|---|
-| マネーフォワードCSV | Google Drive の家計簿フォルダ（手動エクスポート + アップロード） |
-| 予算 / カテゴリ並び順 / メンバー設定 | 同フォルダ内 `budget.json`（アプリが作成・更新） |
-| 取引の手動上書き | 同フォルダ内 `overrides.json`（アプリが作成・更新） |
-| ローカルキャッシュ | ブラウザ IndexedDB `household-budget` |
-| OAuth クライアントID / API キー | Google Cloud Console プロジェクト `household-budget` |
+| 種別                                 | 場所                                                             |
+| ------------------------------------ | ---------------------------------------------------------------- |
+| マネーフォワードCSV                  | Google Drive の家計簿フォルダ（手動エクスポート + アップロード） |
+| 予算 / カテゴリ並び順 / メンバー設定 | 同フォルダ内 `budget.json`（アプリが作成・更新）                 |
+| 取引の手動上書き                     | 同フォルダ内 `overrides.json`（アプリが作成・更新）              |
+| ローカルキャッシュ                   | ブラウザ IndexedDB `household-budget`                            |
+| OAuth クライアントID / API キー      | Google Cloud Console プロジェクト `household-budget`             |
 
 ---
 

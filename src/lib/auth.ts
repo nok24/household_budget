@@ -83,7 +83,9 @@ export function requestToken(
     };
     try {
       client.requestAccessToken({
-        prompt: opts.silent ? '' : 'consent',
+        // silent: 'none' を渡すと UI を一切出さず、無理なら error_description='interaction_required' 等で reject される。
+        // 空文字列だと Google が必要に応じてアカウントチューザを出してしまうので silent 用途には使えない。
+        prompt: opts.silent ? 'none' : 'consent',
         hint: opts.loginHint,
       });
     } catch (e) {
