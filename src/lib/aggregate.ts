@@ -1,0 +1,206 @@
+import dayjs from 'dayjs';
+import { db, type DbTransaction } from './db';
+import { applyOverridesToRows } from './overrides';
+
+export interface MonthSummary {
+  yearMonth: string;
+  income: number;
+  expense: number;
+  balance: number;
+  count: number;
+}
+
+export interface CategoryAgg {
+  name: string;
+  amount: number;
+  count: number;
+}
+
+export function isExpense(t: DbTransaction): boolean {
+  return t.isTarget && !t.isTransfer && t.amount < 0;
+}
+
+export function isIncome(t: DbTransaction): boolean {
+  return t.isTarget && !t.isTransfer && t.amount > 0;
+}
+
+export function shouldCount(t: DbTransaction): boolean {
+  return t.isTarget && !t.isTransfer;
+}
+
+async function loadMonth(yearMonth: string): Promise<DbTransaction[]> {
+  const raw = await db.transactions.where('yearMonth').equals(yearMonth).toArray();
+  return applyOverridesToRows(raw);
+}
+
+export async function getMonthSummary(yearMonth: string): Promise<MonthSummary> {
+  const rows = await loadMonth(yearMonth);
+  let income = 0;
+  let expense = 0;
+  let count = 0;
+  for (const t of rows) {
+    if (!shouldCount(t)) continue;
+    if (t.amount >= 0) income += t.amount;
+    else expense += -t.amount;
+    count += 1;
+  }
+  return { yearMonth, income, expense, balance: income - expense, count };
+}
+
+export function shiftMonth(yearMonth: string, delta: number): string {
+  return dayjs(`${yearMonth}-01`).add(delta, 'month').format('YYYY-MM');
+}
+
+export async function getMonthlyTrend(
+  anchorYearMonth: string,
+  monthsBack: number,
+): Promise<MonthSummary[]> {
+  const months: string[] = [];
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    months.push(shiftMonth(anchorYearMonth, -i));
+  }
+  return Promise.all(months.map((m) => getMonthSummary(m)));
+}
+
+export async function getCategoryBreakdown(yearMonth: string): Promise<CategoryAgg[]> {
+  const rows = await loadMonth(yearMonth);
+  const map = new Map<string, CategoryAgg>();
+  for (const t of rows) {
+    if (!isExpense(t)) continue;
+    const key = t.largeCategory || '未分類';
+    const v = map.get(key) ?? { name: key, amount: 0, count: 0 };
+    v.amount += -t.amount;
+    v.count += 1;
+    map.set(key, v);
+  }
+  return [...map.values()].sort((a, b) => b.amount - a.amount);
+}
+
+export async function getRecentTransactionsForMonth(
+  yearMonth: string,
+  limit: number,
+): Promise<DbTransaction[]> {
+  const rows = await loadMonth(yearMonth);
+  // 集計と表示を一致させるため、計算対象=1 かつ 振替=0 の行のみを表示
+  const filtered = rows.filter(shouldCount);
+  filtered.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  return filtered.slice(0, limit);
+}
+
+export async function getAvailableMonths(): Promise<string[]> {
+  const set = new Set<string>();
+  await db.transactions.each((t) => {
+    if (t.yearMonth) set.add(t.yearMonth);
+  });
+  return [...set].sort();
+}
+
+export async function getAllTransactionsApplied(): Promise<DbTransaction[]> {
+  const raw = await db.transactions.toArray();
+  return applyOverridesToRows(raw);
+}
+
+export async function getDistinctLargeCategoriesApplied(): Promise<string[]> {
+  const rows = await getAllTransactionsApplied();
+  const set = new Set<string>();
+  for (const r of rows) set.add(r.largeCategory || '未分類');
+  return [...set].sort();
+}
+
+export async function getDistinctAccounts(): Promise<{ name: string; count: number }[]> {
+  const map = new Map<string, number>();
+  await db.transactions.each((t) => {
+    if (!t.account) return;
+    map.set(t.account, (map.get(t.account) ?? 0) + 1);
+  });
+  return [...map.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/**
+ * 指定カテゴリの月別支出（直近 monthsBack ヶ月）。
+ */
+export async function getCategoryMonthlyTrend(
+  category: string,
+  anchorYearMonth: string,
+  monthsBack: number,
+): Promise<{ yearMonth: string; amount: number }[]> {
+  const months: string[] = [];
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    months.push(shiftMonth(anchorYearMonth, -i));
+  }
+  const results = await Promise.all(
+    months.map(async (ym) => {
+      const rows = await loadMonth(ym);
+      let total = 0;
+      for (const t of rows) {
+        if (!isExpense(t)) continue;
+        const key = t.largeCategory || '未分類';
+        if (key !== category) continue;
+        total += -t.amount;
+      }
+      return { yearMonth: ym, amount: total };
+    }),
+  );
+  return results;
+}
+
+/**
+ * 指定カテゴリの店舗別（contentName）支出 TOP N。
+ */
+export async function getStoreTopForCategory(
+  yearMonth: string,
+  category: string,
+  topN: number,
+): Promise<{ name: string; amount: number; count: number }[]> {
+  const rows = await loadMonth(yearMonth);
+  const map = new Map<string, { name: string; amount: number; count: number }>();
+  for (const t of rows) {
+    if (!isExpense(t)) continue;
+    const key = t.largeCategory || '未分類';
+    if (key !== category) continue;
+    const name = t.contentName || '(不明)';
+    const v = map.get(name) ?? { name, amount: 0, count: 0 };
+    v.amount += -t.amount;
+    v.count += 1;
+    map.set(name, v);
+  }
+  const sorted = [...map.values()].sort((a, b) => b.amount - a.amount);
+  if (sorted.length <= topN) return sorted;
+  const top = sorted.slice(0, topN - 1);
+  const rest = sorted.slice(topN - 1);
+  const restAmount = rest.reduce((s, r) => s + r.amount, 0);
+  const restCount = rest.reduce((s, r) => s + r.count, 0);
+  return [
+    ...top,
+    { name: `その他（${rest.length}件）`, amount: restAmount, count: restCount },
+  ];
+}
+
+/**
+ * 指定カテゴリの曜日別 平均支出。
+ */
+export async function getDayOfWeekAverageForCategory(
+  yearMonth: string,
+  category: string,
+): Promise<{ dow: number; label: string; average: number }[]> {
+  const rows = await loadMonth(yearMonth);
+  const sums: number[] = [0, 0, 0, 0, 0, 0, 0];
+  const counts: number[] = [0, 0, 0, 0, 0, 0, 0];
+  for (const t of rows) {
+    if (!isExpense(t)) continue;
+    const key = t.largeCategory || '未分類';
+    if (key !== category) continue;
+    if (!t.date) continue;
+    const dow = dayjs(t.date).day();
+    sums[dow] += -t.amount;
+    counts[dow] += 1;
+  }
+  const labels = ['日', '月', '火', '水', '木', '金', '土'];
+  return labels.map((label, dow) => ({
+    dow,
+    label,
+    average: counts[dow] > 0 ? sums[dow] / counts[dow] : 0,
+  }));
+}
