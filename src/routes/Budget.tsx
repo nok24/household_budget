@@ -132,21 +132,9 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
   const setConfig = useBudgetStore((s) => s.setConfig);
 
   // 候補カテゴリ: budget の default + monthly + 取引データ由来
-  const knownCategoriesFromTx = useLiveQuery(
-    () => getDistinctLargeCategoriesApplied(),
-    [],
-    [],
-  );
-  const breakdown = useLiveQuery(
-    () => getCategoryBreakdown(selectedMonth),
-    [selectedMonth],
-    [],
-  );
-  const monthSummary = useLiveQuery(
-    () => getMonthSummary(selectedMonth),
-    [selectedMonth],
-    null,
-  );
+  const knownCategoriesFromTx = useLiveQuery(() => getDistinctLargeCategoriesApplied(), [], []);
+  const breakdown = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
+  const monthSummary = useLiveQuery(() => getMonthSummary(selectedMonth), [selectedMonth], null);
 
   const expenseByCategory = useMemo(() => {
     const m = new Map<string, number>();
@@ -203,10 +191,11 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
         <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
           <h2 className="text-sm font-semibold tracking-wider text-ink-70">月全体</h2>
           <div className="text-xs text-ink-60 tabular-nums">
-            支出 {formatYen(totalSpent)} / 予算{' '}
-            {totalBudget > 0 ? formatYen(totalBudget) : '—'}
+            支出 {formatYen(totalSpent)} / 予算 {totalBudget > 0 ? formatYen(totalBudget) : '—'}
             {totalBudget > 0 && (
-              <span className={cn('ml-2 font-medium', totalPct > 100 ? 'text-rose-700' : 'text-ink')}>
+              <span
+                className={cn('ml-2 font-medium', totalPct > 100 ? 'text-rose-700' : 'text-ink')}
+              >
                 {formatPct(totalPct)}
               </span>
             )}
@@ -223,7 +212,9 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
               <th className="py-2 px-4 w-1/3">カテゴリ</th>
               <th className="py-2 px-4 text-right tabular-nums">今月支出</th>
               <th className="py-2 px-4 w-[140px]">毎月予算</th>
-              <th className="py-2 px-4 w-[160px]">{dayjs(`${selectedMonth}-01`).format('M月')}のみ上書き</th>
+              <th className="py-2 px-4 w-[160px]">
+                {dayjs(`${selectedMonth}-01`).format('M月')}のみ上書き
+              </th>
               <th className="py-2 px-4 w-[180px]">進捗</th>
             </tr>
           </thead>
@@ -279,7 +270,7 @@ function CategoryRow({
 }) {
   const pct = effective > 0 ? (spent / effective) * 100 : 0;
   return (
-    <tr className="border-b border-line/40 last:border-0">
+    <tr className="border-b border-line last:border-0">
       <td className="py-2 px-4">
         <span
           className="text-[11px] px-1.5 py-0.5 rounded-sm"
@@ -302,9 +293,7 @@ function CategoryRow({
         <BudgetInput
           value={typeof monthOverride === 'number' ? monthOverride : null}
           onChange={onSetMonth}
-          placeholder={
-            typeof defaultBudget === 'number' ? formatYen(defaultBudget) : '—'
-          }
+          placeholder={typeof defaultBudget === 'number' ? formatYen(defaultBudget) : '—'}
           highlight
         />
       </td>
@@ -362,4 +351,3 @@ function BudgetInput({
     </div>
   );
 }
-

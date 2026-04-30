@@ -1,10 +1,7 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatYen } from '@/lib/utils';
-import {
-  getMonthlyDiagnostics,
-  getPositiveTransactionsForMonth,
-} from '@/lib/diagnostics';
+import { getMonthlyDiagnostics, getPositiveTransactionsForMonth } from '@/lib/diagnostics';
 
 export default function DiagnosticsPanel() {
   const months = useLiveQuery(() => getMonthlyDiagnostics(), [], []);
@@ -36,34 +33,25 @@ export default function DiagnosticsPanel() {
           </thead>
           <tbody>
             {months.map((m) => {
-              const suspicious =
-                m.positiveRows > 0 && m.countedIncomeRows === 0;
+              const suspicious = m.positiveRows > 0 && m.countedIncomeRows === 0;
               return (
                 <tr
                   key={m.yearMonth}
                   className={cn(
-                    'border-b border-line/40 last:border-0 cursor-pointer hover:bg-canvas',
+                    'border-b border-line last:border-0 cursor-pointer hover:bg-canvas',
                     suspicious && 'bg-rose-50/60',
                     expandedMonth === m.yearMonth && 'bg-canvas',
                   )}
                   onClick={() =>
-                    setExpandedMonth((prev) =>
-                      prev === m.yearMonth ? null : m.yearMonth,
-                    )
+                    setExpandedMonth((prev) => (prev === m.yearMonth ? null : m.yearMonth))
                   }
                 >
-                  <td className="py-2 pr-3 whitespace-nowrap font-medium">
-                    {m.yearMonth}
-                  </td>
+                  <td className="py-2 pr-3 whitespace-nowrap font-medium">{m.yearMonth}</td>
                   <td className="py-2 pr-3 text-right text-ink-60">{m.total}</td>
                   <td className="py-2 pr-3 text-right">{m.positiveRows}</td>
                   <td className="py-2 pr-3 text-right">{m.negativeRows}</td>
-                  <td className="py-2 pr-3 text-right text-ink-60">
-                    {m.transferRows}
-                  </td>
-                  <td className="py-2 pr-3 text-right text-ink-60">
-                    {m.nonTargetRows}
-                  </td>
+                  <td className="py-2 pr-3 text-right text-ink-60">{m.transferRows}</td>
+                  <td className="py-2 pr-3 text-right text-ink-60">{m.nonTargetRows}</td>
                   <td
                     className={cn(
                       'py-2 pr-3 text-right',
@@ -88,29 +76,22 @@ export default function DiagnosticsPanel() {
       </div>
 
       <p className="text-[11px] text-ink-40 leading-relaxed">
-        列の意味: <strong>全件</strong>＝CSV取り込み行数 / <strong>+件</strong>＝amount&gt;0
-        / <strong>−件</strong>＝amount&lt;0 / <strong>振替</strong>＝振替フラグ=1 /
-        <strong>対象外</strong>＝計算対象=0 / <strong>集計収入</strong>＝計算対象=1
-        かつ振替=0 かつ amount&gt;0 の件数 / <strong>+総額</strong>＝
-        amount&gt;0の合計（フラグ無視）
+        列の意味: <strong>全件</strong>＝CSV取り込み行数 / <strong>+件</strong>＝amount&gt;0 /{' '}
+        <strong>−件</strong>＝amount&lt;0 / <strong>振替</strong>＝振替フラグ=1 /
+        <strong>対象外</strong>＝計算対象=0 / <strong>集計収入</strong>＝計算対象=1 かつ振替=0 かつ
+        amount&gt;0 の件数 / <strong>+総額</strong>＝ amount&gt;0の合計（フラグ無視）
         <br />
         ピンクの行は「+件は存在するのに、集計収入として認識されている件数が0」という不整合
         サインです。クリックすると amount&gt;0 の取引を一覧表示します。
       </p>
 
-      {expandedMonth && (
-        <PositiveRowsTable yearMonth={expandedMonth} />
-      )}
+      {expandedMonth && <PositiveRowsTable yearMonth={expandedMonth} />}
     </div>
   );
 }
 
 function PositiveRowsTable({ yearMonth }: { yearMonth: string }) {
-  const rows = useLiveQuery(
-    () => getPositiveTransactionsForMonth(yearMonth),
-    [yearMonth],
-    [],
-  );
+  const rows = useLiveQuery(() => getPositiveTransactionsForMonth(yearMonth), [yearMonth], []);
 
   return (
     <div className="border-t border-line pt-4 space-y-2">
@@ -139,29 +120,19 @@ function PositiveRowsTable({ yearMonth }: { yearMonth: string }) {
                 <tr
                   key={t.id}
                   className={cn(
-                    'border-b border-line/30 last:border-0',
+                    'border-b border-line last:border-0',
                     (t.isTransfer || !t.isTarget) && 'text-ink-40',
                   )}
                 >
                   <td className="py-1.5 pr-3 whitespace-nowrap">{t.date}</td>
-                  <td className="py-1.5 pr-3 truncate max-w-[200px]">
-                    {t.contentName}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right">
-                    {formatYen(t.amount)}
-                  </td>
-                  <td className="py-1.5 pr-3 whitespace-nowrap">
-                    {t.largeCategory || '—'}
-                  </td>
+                  <td className="py-1.5 pr-3 truncate max-w-[200px]">{t.contentName}</td>
+                  <td className="py-1.5 pr-3 text-right">{formatYen(t.amount)}</td>
+                  <td className="py-1.5 pr-3 whitespace-nowrap">{t.largeCategory || '—'}</td>
                   <td className="py-1.5 pr-3 whitespace-nowrap text-ink-60">
                     {t.midCategory || '—'}
                   </td>
-                  <td className="py-1.5 pr-3 truncate max-w-[120px]">
-                    {t.account}
-                  </td>
-                  <td className="py-1.5 pr-3 text-center">
-                    {t.isTarget ? '✓' : '×'}
-                  </td>
+                  <td className="py-1.5 pr-3 truncate max-w-[120px]">{t.account}</td>
+                  <td className="py-1.5 pr-3 text-center">{t.isTarget ? '✓' : '×'}</td>
                   <td
                     className={cn(
                       'py-1.5 pr-3 text-center',

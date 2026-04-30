@@ -12,7 +12,7 @@ export default function ProgressBar({ pct, compact, className }: Props) {
   return (
     <div
       className={cn(
-        'w-full bg-canvas rounded-full overflow-hidden border border-line/60',
+        'w-full bg-canvas rounded-full overflow-hidden border border-line',
         compact ? 'h-1' : 'h-1.5',
         className,
       )}

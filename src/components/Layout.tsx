@@ -141,9 +141,8 @@ function SyncStatus() {
       <div className="mt-1 text-ink-60 tabular-nums">
         {status === 'syncing' && '同期中…'}
         {status === 'error' && <span className="text-rose-700">エラー</span>}
-        {status === 'idle' && (lastSyncedAt
-          ? dayjs(lastSyncedAt).format('YYYY/MM/DD HH:mm')
-          : '未同期')}
+        {status === 'idle' &&
+          (lastSyncedAt ? dayjs(lastSyncedAt).format('YYYY/MM/DD HH:mm') : '未同期')}
       </div>
     </div>
   );
@@ -160,7 +159,7 @@ function UserBadge() {
   }
 
   return (
-    <div className="space-y-2 pt-3 border-t border-line/60">
+    <div className="space-y-2 pt-3 border-t border-line">
       <div className="text-[10px] tracking-[0.08em] text-ink-40">アカウント</div>
       <div className="flex items-center gap-2">
         {picture ? (
