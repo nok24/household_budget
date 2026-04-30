@@ -4,20 +4,21 @@ import { decodeCsvBytes } from './csv';
 // 資産推移CSV（妻が別フォルダで管理しているマネーフォワード資産推移エクスポート）
 // の列構成。MFの取引CSV（src/lib/csv.ts）とは別物で、列単位の残高スナップショット。
 //
-// 期待されるヘッダ:
-//   日付,合計(円),預金・現金・暗号資産(円),株式(現物)(円),投資信託(円),年金(円),ポイント(円)
+// 期待されるヘッダ（MFの実エクスポート準拠。各セルは "..." でクォート、（円）は全角、
+// 「(現物)」のみ半角パーレンが混在する）:
+//   "日付","合計（円）","預金・現金・暗号資産（円）","株式(現物)（円）","投資信託（円）","年金（円）","ポイント（円）"
 //
 // 直近は日次・過去は月末のみ、というふうに混在しているのが実データ。
 // アプリでは月次集計だけ使うので、各月の最終日付の行を「月末スナップショット」扱いに丸める。
 
 export interface RawAssetRow {
   日付?: string;
-  '合計(円)'?: string;
-  '預金・現金・暗号資産(円)'?: string;
-  '株式(現物)(円)'?: string;
-  '投資信託(円)'?: string;
-  '年金(円)'?: string;
-  'ポイント(円)'?: string;
+  '合計（円）'?: string;
+  '預金・現金・暗号資産（円）'?: string;
+  '株式(現物)（円）'?: string;
+  '投資信託（円）'?: string;
+  '年金（円）'?: string;
+  'ポイント（円）'?: string;
 }
 
 export interface AssetRow {
@@ -43,20 +44,30 @@ export interface MonthlyAssetSnapshot {
 
 const REQUIRED_HEADERS = [
   '日付',
-  '合計(円)',
-  '預金・現金・暗号資産(円)',
-  '株式(現物)(円)',
-  '投資信託(円)',
+  '合計（円）',
+  '預金・現金・暗号資産（円）',
+  '株式(現物)（円）',
+  '投資信託（円）',
 ];
+
+/** クォートを剥がしてトリムする（CSV 1行目の手動分解用） */
+function stripQuotes(s: string): string {
+  const t = s.trim();
+  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+    return t.slice(1, -1).replace(/""/g, '"');
+  }
+  return t;
+}
 
 /**
  * ヘッダ行を検査して資産推移CSVと判定できるかを返す。
  * 取引CSVと混在しても誤って取り込まないための安全弁。
+ * MFのCSVは各セルがクォート済みなので unquote してから比較する。
  */
 export function looksLikeAssetCsv(text: string): boolean {
   // 先頭行だけ取って簡易判定。BOM除去 + 改行どちらでも対応
   const firstLine = text.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0] ?? '';
-  const cells = firstLine.split(',').map((s) => s.trim());
+  const cells = firstLine.split(',').map(stripQuotes);
   return REQUIRED_HEADERS.every((h) => cells.includes(h));
 }
 
@@ -91,12 +102,12 @@ export function parseRawAssetCsv(text: string): RawAssetRow[] {
 export function normalizeAssetRow(raw: RawAssetRow): AssetRow {
   return {
     date: parseDate(raw.日付 ?? ''),
-    total: parseYen(raw['合計(円)']),
-    savings: parseYen(raw['預金・現金・暗号資産(円)']),
-    stocks: parseYen(raw['株式(現物)(円)']),
-    funds: parseYen(raw['投資信託(円)']),
-    pension: parseYen(raw['年金(円)']),
-    points: parseYen(raw['ポイント(円)']),
+    total: parseYen(raw['合計（円）']),
+    savings: parseYen(raw['預金・現金・暗号資産（円）']),
+    stocks: parseYen(raw['株式(現物)（円）']),
+    funds: parseYen(raw['投資信託（円）']),
+    pension: parseYen(raw['年金（円）']),
+    points: parseYen(raw['ポイント（円）']),
   };
 }
 

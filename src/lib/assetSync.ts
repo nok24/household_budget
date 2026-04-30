@@ -44,7 +44,6 @@ export async function syncAssetFolder(
         console.warn('[asset-sync] skipped (header mismatch)', {
           name: file.name,
           firstLine,
-          firstLineCharCodes: [...firstLine.slice(0, 50)].map((c) => c.charCodeAt(0)),
         });
         skipped++;
         continue;
