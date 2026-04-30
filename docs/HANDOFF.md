@@ -190,6 +190,7 @@ if (!items || items.length === 0) return null;
 - **「This app is blocked」**: Testing モードの未登録アカウントでログインしようとしている → Cloud Console でテストユーザに追加
 - **「Failed to open popup」**: ブラウザのポップアップブロッカー → サイト個別に許可
 - **CSP エラー（Cloudflare ログで確認）**: `_headers` の CSP に新しいオリジンを追加が必要
+- **Picker で「The API developer key is invalid」**: `_headers` の `Referrer-Policy` が `no-referrer` だと Referer ヘッダが送られず、Google APIキーの「ウェブサイトの制限（HTTP リファラー）」が常にブロックする。`strict-origin-when-cross-origin` にしてオリジンだけ送るのが正解。`no-referrer` は API キーのリファラー制限を実質無効化するので組み合わせて使えない
 
 ---
 
