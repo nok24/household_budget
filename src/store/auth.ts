@@ -34,6 +34,9 @@ const REFRESH_LEEWAY_MS = 5 * 60 * 1000;
 // 一度でも明示ログインに成功したらこのフラグを立て、以降のリロードで silent を試す。
 // localStorage に置くだけで、トークンそのものは保存しない（メモリのみ）。
 const ONCE_AUTHED_FLAG = 'household.auth.has-been-authed';
+// silent 再認証に渡す loginHint を復元するための、最後に成功したログインのメールアドレス。
+// トークンではないので XSS で漏れても被害は実質無し（ユーザ自身のメールアドレスのみ）。
+const LAST_EMAIL_KEY = 'household.auth.last-email';
 function markAuthedOnce() {
   try {
     localStorage.setItem(ONCE_AUTHED_FLAG, '1');
@@ -51,8 +54,23 @@ function hasBeenAuthed(): boolean {
 function clearAuthedFlag() {
   try {
     localStorage.removeItem(ONCE_AUTHED_FLAG);
+    localStorage.removeItem(LAST_EMAIL_KEY);
   } catch {
     /* noop */
+  }
+}
+function rememberEmail(email: string) {
+  try {
+    localStorage.setItem(LAST_EMAIL_KEY, email);
+  } catch {
+    /* noop */
+  }
+}
+function recallEmail(): string | null {
+  try {
+    return localStorage.getItem(LAST_EMAIL_KEY);
+  } catch {
+    return null;
   }
 }
 
@@ -77,6 +95,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error: 'VITE_GOOGLE_CLIENT_ID が設定されていません',
       });
       return;
+    }
+    // 直近にログインしたメールを復元しておくと silent re-auth で loginHint として使える。
+    // トークンは復元せず、純粋にアカウント特定のためだけに使う。
+    const lastEmail = recallEmail();
+    if (lastEmail) {
+      set({ email: lastEmail });
     }
     try {
       await loadGisScript();
@@ -110,6 +134,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       markAuthedOnce();
+      rememberEmail(user.email);
       set({
         status: 'ready',
         accessToken: token.access_token,
@@ -128,9 +153,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   async silentRefresh() {
+    // メモリ上に email が無い場合は localStorage の最終ログインメールを使う（リロード直後はこっち）。
     const { email } = get();
+    const hint = email ?? recallEmail() ?? undefined;
     try {
-      const token = await requestToken(CLIENT_ID, { silent: true, loginHint: email ?? undefined });
+      const token = await requestToken(CLIENT_ID, { silent: true, loginHint: hint });
       const expiresAt = Date.now() + token.expires_in * 1000;
       // silent でも一応 user 情報を取り直す（メール変更などの稀ケース対策）
       const user = await fetchUserInfo(token.access_token);
@@ -144,6 +171,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         });
         return false;
       }
+      rememberEmail(user.email);
       set({
         status: 'ready',
         accessToken: token.access_token,
