@@ -4,6 +4,7 @@ import {
   createJsonFile,
   findConfigFile,
   getFileMeta,
+  isAppNotAuthorizedToFile,
   readJsonFile,
   updateJsonFile,
   type ConfigFileMeta,
@@ -98,9 +99,26 @@ export async function saveBudget(
   fileId: string,
   config: BudgetConfig,
 ): Promise<ConfigFileMeta> {
-  const meta = await updateJsonFile(accessToken, fileId, config);
-  await setCachedFileId(meta.id);
-  return meta;
+  try {
+    const meta = await updateJsonFile(accessToken, fileId, config);
+    await setCachedFileId(meta.id);
+    return meta;
+  } catch (e) {
+    if (!isAppNotAuthorizedToFile(e)) throw e;
+    // 既存 budget.json はアプリ所有でない（手動配置 or 別クライアントID 由来）。
+    // 同フォルダにアプリ所有の新規ファイルを作成してそちらに書き込む。
+    // 古いファイルは drive.file スコープでは削除できないので、ユーザに手動削除を促す。
+    const folderRow = await db.meta.get(FOLDER_ID_KEY);
+    const folderId = typeof folderRow?.value === 'string' ? folderRow.value : null;
+    if (!folderId) throw e;
+    console.warn(
+      `[budget] update 403 → fallback to create new ${BUDGET_FILE_NAME}. ` +
+        `古い ${BUDGET_FILE_NAME} は Drive 上に残るので、確認後に手動で削除してください。`,
+    );
+    const created = await createJsonFile(accessToken, folderId, BUDGET_FILE_NAME, config);
+    await setCachedFileId(created.id);
+    return created;
+  }
 }
 
 function mergeWithDefaults(loaded: Partial<BudgetConfig>): BudgetConfig {

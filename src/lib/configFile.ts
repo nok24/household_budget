@@ -32,10 +32,7 @@ export async function findConfigFile(
   return data.files?.[0] ?? null;
 }
 
-export async function readJsonFile<T>(
-  accessToken: string,
-  fileId: string,
-): Promise<T> {
+export async function readJsonFile<T>(accessToken: string, fileId: string): Promise<T> {
   const res = await fetch(`${FILES}/${fileId}?alt=media`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -46,10 +43,7 @@ export async function readJsonFile<T>(
   return (await res.json()) as T;
 }
 
-export async function getFileMeta(
-  accessToken: string,
-  fileId: string,
-): Promise<ConfigFileMeta> {
+export async function getFileMeta(accessToken: string, fileId: string): Promise<ConfigFileMeta> {
   const params = new URLSearchParams({ fields: 'id,name,modifiedTime' });
   const res = await fetch(`${FILES}/${fileId}?${params.toString()}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -100,6 +94,17 @@ export async function createJsonFile<T>(
     throw new Error(`drive create ${res.status}: ${errBody || res.statusText}`);
   }
   return (await res.json()) as ConfigFileMeta;
+}
+
+/**
+ * drive.file スコープでは「アプリが作成したファイル / Pickerで開いたファイル」しか書けない。
+ * 既存の budget.json / overrides.json が他のクライアントID 由来 or 手動配置だと 403
+ * `appNotAuthorizedToFile` が返る。呼び出し側でこれを検出して `createJsonFile` に
+ * フォールバックするための判別ヘルパ。
+ */
+export function isAppNotAuthorizedToFile(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.includes('appNotAuthorizedToFile') || msg.includes('403');
 }
 
 export async function updateJsonFile<T>(

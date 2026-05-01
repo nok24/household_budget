@@ -2,6 +2,7 @@ import { db, type DbOverride } from './db';
 import {
   createJsonFile,
   findConfigFile,
+  isAppNotAuthorizedToFile,
   readJsonFile,
   updateJsonFile,
   type ConfigFileMeta,
@@ -75,12 +76,7 @@ async function locateOrCreate(
     }
   }
 
-  const created = await createJsonFile(
-    accessToken,
-    folderId,
-    OVERRIDES_FILE_NAME,
-    EMPTY_OVERRIDES,
-  );
+  const created = await createJsonFile(accessToken, folderId, OVERRIDES_FILE_NAME, EMPTY_OVERRIDES);
   await setCachedFileId(created.id);
   return { data: structuredClone(EMPTY_OVERRIDES), meta: created };
 }
@@ -96,10 +92,7 @@ function normalize(loaded: Partial<OverridesFile> | null | undefined): Overrides
  * Drive 上の overrides.json を読み込み、IndexedDB に上書き反映する。
  * 起動時 / 手動リフレッシュ時に呼ぶ。
  */
-export async function pullOverridesFromDrive(
-  accessToken: string,
-  folderId: string,
-): Promise<void> {
+export async function pullOverridesFromDrive(accessToken: string, folderId: string): Promise<void> {
   const { data } = await locateOrCreate(accessToken, folderId);
   await db.transaction('rw', db.overrides, async () => {
     await db.overrides.clear();
@@ -126,7 +119,9 @@ export async function pushOverridesToDrive(accessToken: string): Promise<void> {
   const r = await db.meta.get(FILE_ID_KEY);
   const fileId = typeof r?.value === 'string' ? r.value : null;
   if (!fileId) {
-    throw new Error('overrides.json の fileId がキャッシュされていません。フォルダを再選択してください');
+    throw new Error(
+      'overrides.json の fileId がキャッシュされていません。フォルダを再選択してください',
+    );
   }
   const all = await db.overrides.toArray();
   const file: OverridesFile = {
@@ -145,5 +140,20 @@ export async function pushOverridesToDrive(accessToken: string): Promise<void> {
       ]),
     ),
   };
-  await updateJsonFile(accessToken, fileId, file);
+  try {
+    await updateJsonFile(accessToken, fileId, file);
+  } catch (e) {
+    if (!isAppNotAuthorizedToFile(e)) throw e;
+    // budget.ts と同じ理由で、アプリ所有でない overrides.json への書き込みは 403 になる。
+    // フォルダ ID をメタから取って新規作成にフォールバック。
+    const folderRow = await db.meta.get(FOLDER_ID_KEY);
+    const folderId = typeof folderRow?.value === 'string' ? folderRow.value : null;
+    if (!folderId) throw e;
+    console.warn(
+      `[overrides] update 403 → fallback to create new ${OVERRIDES_FILE_NAME}. ` +
+        `古い ${OVERRIDES_FILE_NAME} は Drive 上に残るので、確認後に手動で削除してください。`,
+    );
+    const created = await createJsonFile(accessToken, folderId, OVERRIDES_FILE_NAME, file);
+    await setCachedFileId(created.id);
+  }
 }
