@@ -26,6 +26,7 @@ export const DEFAULT_BUDGET: BudgetConfig = {
   categories: [],
   categoryOrder: [],
   budgets: { default: {}, monthly: {} },
+  accountAnchors: [],
   settings: {
     fiscalMonthStartDay: 1,
     incomeCategoryId: '_income',
@@ -87,12 +88,7 @@ export async function loadOrInitBudget(
   }
 
   // 新規作成
-  const created = await createJsonFile(
-    accessToken,
-    folderId,
-    BUDGET_FILE_NAME,
-    DEFAULT_BUDGET,
-  );
+  const created = await createJsonFile(accessToken, folderId, BUDGET_FILE_NAME, DEFAULT_BUDGET);
   await setCachedFileId(created.id);
   return { config: structuredClone(DEFAULT_BUDGET), meta: created, isNew: true };
 }
@@ -118,6 +114,7 @@ function mergeWithDefaults(loaded: Partial<BudgetConfig>): BudgetConfig {
       default: loaded.budgets?.default ?? {},
       monthly: loaded.budgets?.monthly ?? {},
     },
+    accountAnchors: loaded.accountAnchors ?? [],
     settings: {
       fiscalMonthStartDay:
         loaded.settings?.fiscalMonthStartDay ?? DEFAULT_BUDGET.settings.fiscalMonthStartDay,
@@ -152,9 +149,7 @@ export function orderCategories(
       seen.add(c);
     }
   }
-  const remaining = [...set]
-    .filter((c) => !seen.has(c))
-    .sort((a, b) => a.localeCompare(b, 'ja'));
+  const remaining = [...set].filter((c) => !seen.has(c)).sort((a, b) => a.localeCompare(b, 'ja'));
   return [...ordered, ...remaining];
 }
 
@@ -181,10 +176,7 @@ export function getTotalDefaultBudget(config: BudgetConfig | null): number {
   );
 }
 
-export function getTotalMonthBudget(
-  config: BudgetConfig | null,
-  yearMonth: string,
-): number {
+export function getTotalMonthBudget(config: BudgetConfig | null, yearMonth: string): number {
   if (!config) return 0;
   // default をベースに monthly[ym] で上書き、その合計
   const keys = new Set<string>([

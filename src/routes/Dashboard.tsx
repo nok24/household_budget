@@ -23,6 +23,7 @@ import {
 import { getMonthBudget, getTotalMonthBudget, orderCategories } from '@/lib/budget';
 import { colorForCategory } from '@/lib/categories';
 import { getAssetDelta, getAssetSnapshot } from '@/lib/assets';
+import { computeMonthlyBalances } from '@/lib/accountBalance';
 import { cn, formatYen, formatPct } from '@/lib/utils';
 
 export default function Dashboard() {
@@ -151,6 +152,23 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
   );
   const assetSnapshot = useLiveQuery(() => getAssetSnapshot(selectedMonth), [selectedMonth], null);
   const assetDelta = useLiveQuery(() => getAssetDelta(selectedMonth), [selectedMonth], null);
+  const accountAnchors = useBudgetStore((s) => s.config?.accountAnchors);
+  const accountBalances = useLiveQuery(
+    async () => {
+      if (!accountAnchors || accountAnchors.length === 0) return [];
+      const series = await Promise.all(
+        accountAnchors.map(async (a) => {
+          const all = await computeMonthlyBalances(a);
+          const cur = all.find((s) => s.yearMonth === selectedMonth);
+          const prev = all.find((s) => s.yearMonth === shiftMonth(selectedMonth, -1));
+          return { anchor: a, current: cur, prev };
+        }),
+      );
+      return series;
+    },
+    [accountAnchors, selectedMonth],
+    [],
+  );
 
   const totalBudget = getTotalMonthBudget(budgetConfig, selectedMonth);
 
@@ -183,19 +201,40 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
 
   return (
     <div className="space-y-4">
-      {/* 資産 KPI（資産フォルダ設定時のみ） */}
-      {assetSnapshot && (
+      {/* 資産 KPI（資産フォルダ + 口座アンカー設定時のみ） */}
+      {(assetSnapshot || accountBalances.some((b) => b.current)) && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard
-            label="総資産"
-            value={assetSnapshot.total}
-            sub={
-              assetDelta
-                ? `前月比 ${assetDelta.total >= 0 ? '+' : '−'}${formatYen(Math.abs(assetDelta.total))}`
-                : `月末 ${assetSnapshot.date.replaceAll('-', '/')}`
-            }
-            delta={totalAssetDeltaPct}
-          />
+          {assetSnapshot && (
+            <KpiCard
+              label="総資産"
+              value={assetSnapshot.total}
+              sub={
+                assetDelta
+                  ? `前月比 ${assetDelta.total >= 0 ? '+' : '−'}${formatYen(Math.abs(assetDelta.total))}`
+                  : `月末 ${assetSnapshot.date.replaceAll('-', '/')}`
+              }
+              delta={totalAssetDeltaPct}
+            />
+          )}
+          {accountBalances.map((b) => {
+            if (!b.current) return null;
+            const delta = b.prev !== undefined ? b.current.balance - b.prev.balance : null;
+            const deltaPct =
+              b.prev !== undefined && b.prev.balance !== 0 ? (delta! / b.prev.balance) * 100 : null;
+            return (
+              <KpiCard
+                key={b.anchor.id}
+                label={`${b.anchor.label}（推定）`}
+                value={b.current.balance}
+                sub={
+                  delta !== null
+                    ? `前月比 ${delta >= 0 ? '+' : '−'}${formatYen(Math.abs(delta))}`
+                    : `基準日 ${b.anchor.asOfDate.replaceAll('-', '/')}`
+                }
+                delta={deltaPct}
+              />
+            );
+          })}
         </div>
       )}
 
