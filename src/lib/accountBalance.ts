@@ -76,7 +76,10 @@ export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<Mon
   if (!anchor.pattern || !anchor.asOfDate) return [];
   const rows = await loadAccountTransactions(anchor.pattern);
 
-  // 計算範囲の決定。取引・アンカー月・現在月をすべて内包するように。
+  // 計算範囲の決定。取引・アンカー月・現在月を内包しつつ、取引が無くても
+  // 過去 24 ヶ月は遡って表示できるよう range を広げる。これにより:
+  // - pattern にマッチする取引がゼロでも、過去月にアンカー残高が一貫して表示される
+  // - 取引データが短い口座でも、月切替で過去を見てもKPIが消えない
   const knownMonths = new Set<string>();
   for (const t of rows) {
     if (t.yearMonth) knownMonths.add(t.yearMonth);
@@ -85,6 +88,7 @@ export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<Mon
   knownMonths.add(anchorMonth);
   const currentMonth = dayjs().format('YYYY-MM');
   knownMonths.add(currentMonth);
+  knownMonths.add(shiftMonth(anchorMonth, -24));
 
   const sortedKnown = [...knownMonths].sort();
   const earliest = sortedKnown[0];
