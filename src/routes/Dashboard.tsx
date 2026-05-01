@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import dayjs from 'dayjs';
 import FolderPickerButton from '@/components/FolderPickerButton';
 import MonthSwitcher from '@/components/MonthSwitcher';
+import PaceBadge from '@/components/PaceBadge';
 import ProgressBar from '@/components/ProgressBar';
 import TrendBarChart from '@/components/charts/TrendBarChart';
 import CategoryDonut from '@/components/charts/CategoryDonut';
@@ -22,7 +23,13 @@ import {
   getYearToDateSummary,
   shiftMonth,
 } from '@/lib/aggregate';
-import { getAnnualBudget, getAnnualTotalBudget, orderCategories } from '@/lib/budget';
+import {
+  getAnnualBudget,
+  getAnnualTotalBudget,
+  getExpectedPaceAtMonth,
+  judgePace,
+  orderCategories,
+} from '@/lib/budget';
 import { colorForCategory } from '@/lib/categories';
 import { getAssetDelta, getAssetSnapshotOrLatestBefore } from '@/lib/assets';
 import { computeMonthlyBalances, type MonthlyBalance } from '@/lib/accountBalance';
@@ -219,6 +226,10 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
       ? (assetDelta.total / (assetSnapshot.total - assetDelta.total)) * 100
       : null;
 
+  const expectedPct = getExpectedPaceAtMonth(selectedMonth);
+  const ytdPct = yearlyBudget > 0 && ytdSummary ? (ytdSummary.expense / yearlyBudget) * 100 : 0;
+  const paceVerdict = yearlyBudget > 0 && ytdSummary ? judgePace(ytdPct, expectedPct) : null;
+
   return (
     <div className="space-y-4">
       {/* 資産 KPI（資産フォルダ + 口座アンカー設定時のみ） */}
@@ -286,6 +297,11 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
           progress={
             yearlyBudget > 0 && ytdSummary
               ? { current: ytdSummary.expense, max: yearlyBudget }
+              : undefined
+          }
+          pace={
+            paceVerdict
+              ? { label: paceVerdict.label, tone: paceVerdict.tone, expected: expectedPct }
               : undefined
           }
         />
@@ -373,6 +389,8 @@ interface KpiCardProps {
   numeric?: boolean;
   customDisplay?: string;
   progress?: { current: number; max: number };
+  /** 進捗バー下に表示するペースバッジ。年間予算消化のときだけ渡す。 */
+  pace?: { label: string; tone: 'over' | 'fast' | 'normal' | 'slow'; expected: number };
 }
 
 function KpiCard({
@@ -386,6 +404,7 @@ function KpiCard({
   numeric,
   customDisplay,
   progress,
+  pace,
 }: KpiCardProps) {
   let deltaColor = 'text-ink-60';
   let deltaSign = '';
@@ -433,15 +452,17 @@ function KpiCard({
       {pct !== null && (
         <div className="mt-3 space-y-1">
           <ProgressBar pct={pct} compact />
-          <div className="text-[10px] text-ink-60 tabular-nums">
+          <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-ink-60 tabular-nums">
+            {pace && <PaceBadge tone={pace.tone}>{pace.label}</PaceBadge>}
             {overage > 0 ? (
               <span className="text-rose-700 font-medium">
                 {formatPct(pct)} · 超過 {formatYen(overage)}
               </span>
             ) : (
-              <>
+              <span>
                 {formatPct(pct)} 消化 · 残 {formatYen(remaining)}
-              </>
+                {pace && <span className="text-ink-40"> · 期待 {formatPct(pace.expected)}</span>}
+              </span>
             )}
           </div>
         </div>
@@ -479,6 +500,7 @@ function BudgetUsageCard({ selectedMonth }: { selectedMonth: string }) {
     [selectedMonth],
     [],
   );
+  const expectedPct = getExpectedPaceAtMonth(selectedMonth);
 
   // 予算が設定されているカテゴリ + 使用額があるカテゴリを order に従って表示
   const rows = (() => {
@@ -513,10 +535,18 @@ function BudgetUsageCard({ selectedMonth }: { selectedMonth: string }) {
           {rows.map((r) => {
             const p = r.budget > 0 ? (r.spent / r.budget) * 100 : 0;
             const over = p > 100;
+            const pace = r.budget > 0 ? judgePace(p, expectedPct) : null;
             return (
               <div key={r.name}>
-                <div className="flex justify-between text-[11px] mb-1">
-                  <span>{r.name}</span>
+                <div className="flex justify-between items-center text-[11px] mb-1 gap-2">
+                  <span className="flex items-center gap-1.5">
+                    <span>{r.name}</span>
+                    {pace && (
+                      <PaceBadge tone={pace.tone} compact>
+                        {pace.label}
+                      </PaceBadge>
+                    )}
+                  </span>
                   <span
                     className={cn(
                       'tabular-nums',

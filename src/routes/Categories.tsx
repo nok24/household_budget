@@ -14,7 +14,8 @@ import {
   getMonthSummary,
   getStoreTopForCategory,
 } from '@/lib/aggregate';
-import { getAnnualBudget } from '@/lib/budget';
+import { getAnnualBudget, getExpectedPaceAtMonth, judgePace } from '@/lib/budget';
+import PaceBadge from '@/components/PaceBadge';
 import { colorForCategory } from '@/lib/categories';
 import { cn, formatYen, formatPct } from '@/lib/utils';
 
@@ -179,6 +180,8 @@ function CategoryRow({
   const sparkData = trend.map((t) => t.amount);
   const occupancy = totalExpense > 0 ? (amount / totalExpense) * 100 : 0;
   const budgetPct = yearlyBudget > 0 ? (ytdAmount / yearlyBudget) * 100 : 0;
+  const expectedPct = getExpectedPaceAtMonth(selectedMonth);
+  const pace = yearlyBudget > 0 ? judgePace(budgetPct, expectedPct) : null;
   const color = colorForCategory(category);
 
   let budgetColor = 'text-accent';
@@ -210,14 +213,25 @@ function CategoryRow({
       />
       <span className="text-right tabular-nums font-medium">{formatYen(amount)}</span>
       <span
-        className={cn('text-right tabular-nums text-[11px] font-medium', budgetColor)}
+        className="text-right tabular-nums text-[11px] flex flex-col items-end gap-0.5"
         title={
           yearlyBudget > 0
-            ? `今年累計 ${formatYen(ytdAmount)} / 年間予算 ${formatYen(yearlyBudget)}`
+            ? `今年累計 ${formatYen(ytdAmount)} / 年間予算 ${formatYen(yearlyBudget)} · 期待 ${formatPct(expectedPct)}`
             : undefined
         }
       >
-        {yearlyBudget > 0 ? formatPct(budgetPct, 0) : '—'}
+        {yearlyBudget > 0 ? (
+          <>
+            <span className={cn('font-medium', budgetColor)}>{formatPct(budgetPct, 0)}</span>
+            {pace && (
+              <PaceBadge tone={pace.tone} compact>
+                {pace.label}
+              </PaceBadge>
+            )}
+          </>
+        ) : (
+          <span className="text-ink-40">—</span>
+        )}
       </span>
     </button>
   );

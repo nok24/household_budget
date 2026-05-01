@@ -2,12 +2,19 @@ import { useEffect, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import dayjs from 'dayjs';
 import MonthSwitcher from '@/components/MonthSwitcher';
+import PaceBadge from '@/components/PaceBadge';
 import ProgressBar from '@/components/ProgressBar';
 import { useAuthStore } from '@/store/auth';
 import { useBudgetStore } from '@/store/budget';
 import { useFolderStore } from '@/store/folder';
 import { useUiStore } from '@/store/ui';
-import { getAnnualBudget, getAnnualTotalBudget, orderCategories } from '@/lib/budget';
+import {
+  getAnnualBudget,
+  getAnnualTotalBudget,
+  getExpectedPaceAtMonth,
+  judgePace,
+  orderCategories,
+} from '@/lib/budget';
 import {
   getCategoryBreakdown,
   getCategoryBreakdownYTD,
@@ -105,10 +112,10 @@ function Header({
       <div>
         <div className="text-[11px] tracking-[0.1em] text-ink-40 mb-1">BUDGET</div>
         <h1 className="text-2xl font-medium leading-tight">
-          {dayjs(`${selectedMonth}-01`).format('YYYY年')} の予算
+          {dayjs(`${selectedMonth}-01`).format('YYYY年 M月')} の予算
         </h1>
         <p className="text-sm text-ink-60 mt-1">
-          カテゴリごとに年間予算を設定。月按分は自動で算出されます。空欄は予算なし扱いです。
+          カテゴリごとに年間予算を設定。月按分は自動で算出され、選択月時点の消化ペースを判定します。
         </p>
       </div>
       {onSave && (
@@ -167,6 +174,8 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
   const yearlyBudget = getAnnualTotalBudget(config);
   const ytdSpent = ytdSummary?.expense ?? 0;
   const ytdPct = yearlyBudget > 0 ? (ytdSpent / yearlyBudget) * 100 : 0;
+  const expectedPct = getExpectedPaceAtMonth(selectedMonth);
+  const totalPace = yearlyBudget > 0 ? judgePace(ytdPct, expectedPct) : null;
 
   function setAnnual(category: string, value: number | null) {
     setConfig((prev) => {
@@ -197,6 +206,16 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
           </div>
         </div>
         <ProgressBar pct={ytdPct} />
+        {totalPace && (
+          <div className="mt-2 flex items-center gap-2 text-[11px] tabular-nums">
+            <PaceBadge tone={totalPace.tone}>{totalPace.label}</PaceBadge>
+            <span className="text-ink-40">
+              実績 {formatPct(ytdPct)} ／ 期待 {formatPct(expectedPct)}（
+              {totalPace.diff >= 0 ? '+' : ''}
+              {formatPct(totalPace.diff)}）
+            </span>
+          </div>
+        )}
       </section>
 
       {/* カテゴリ別編集 */}
@@ -219,6 +238,7 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
                 spent={expenseByCategory.get(cat) ?? 0}
                 annual={getAnnualBudget(config, cat)}
                 ytdSpent={ytdByCategory.get(cat) ?? 0}
+                expectedPct={expectedPct}
                 onSetAnnual={(v) => setAnnual(cat, v)}
               />
             ))}
@@ -246,18 +266,21 @@ function CategoryRow({
   spent,
   annual,
   ytdSpent,
+  expectedPct,
   onSetAnnual,
 }: {
   category: string;
   spent: number;
   annual: number;
   ytdSpent: number;
+  expectedPct: number;
   onSetAnnual: (v: number | null) => void;
 }) {
   const ytdPct = annual > 0 ? (ytdSpent / annual) * 100 : 0;
   const monthlyAllocated = annual / 12;
   // 今月の支出が年間予算の何 % か（参考表示）
   const monthlyPctOfAnnual = annual > 0 ? (spent / annual) * 100 : 0;
+  const pace = annual > 0 ? judgePace(ytdPct, expectedPct) : null;
   return (
     <tr className="border-b border-line last:border-0">
       <td className="py-2 px-4">
@@ -286,11 +309,18 @@ function CategoryRow({
         {annual > 0 ? `${formatYen(Math.round(monthlyAllocated))}/月` : '—'}
       </td>
       <td className="py-2 px-4">
-        {annual > 0 ? (
+        {annual > 0 && pace ? (
           <div className="space-y-1">
             <ProgressBar pct={ytdPct} compact />
-            <div className="text-[10px] text-ink-60 tabular-nums">
-              {formatPct(ytdPct)} · 累計 {formatYen(ytdSpent)} / {formatYen(annual)}
+            <div className="flex items-center gap-1.5 flex-wrap text-[10px] tabular-nums">
+              <PaceBadge tone={pace.tone}>{pace.label}</PaceBadge>
+              <span className="text-ink-60">
+                {formatPct(ytdPct)}
+                <span className="text-ink-40"> / 期待 {formatPct(expectedPct)}</span>
+              </span>
+            </div>
+            <div className="text-[10px] text-ink-40 tabular-nums">
+              累計 {formatYen(ytdSpent)} / {formatYen(annual)}
             </div>
           </div>
         ) : (

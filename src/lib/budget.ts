@@ -218,3 +218,35 @@ export function getAnnualTotalBudget(config: BudgetConfig | null): number {
 export function getMonthlyAllocated(config: BudgetConfig | null, categoryKey: string): number {
   return getAnnualBudget(config, categoryKey) / 12;
 }
+
+/**
+ * その月末時点で「平均ペース」だと年間予算の何%消化していれば順当かを返す。
+ * 月単位の単純按分: M月末なら M/12 × 100。
+ */
+export function getExpectedPaceAtMonth(yearMonth: string): number {
+  const monthIdx = parseInt(yearMonth.slice(5, 7), 10);
+  if (!Number.isFinite(monthIdx) || monthIdx < 1 || monthIdx > 12) return 0;
+  return (monthIdx / 12) * 100;
+}
+
+export type PaceTone = 'over' | 'fast' | 'normal' | 'slow';
+
+export interface PaceVerdict {
+  label: string;
+  tone: PaceTone;
+  /** 期待ペースに対する差分 (pt) */
+  diff: number;
+}
+
+/**
+ * 実消化率と期待ペースを比べてラベル + 色味を返す。
+ * しきい値は ±5pt を「平均的」、それ以上の乖離をハイ/スローに振り分け。
+ * 100% を超えていれば常に「超過」。
+ */
+export function judgePace(actualPct: number, expectedPct: number): PaceVerdict {
+  const diff = actualPct - expectedPct;
+  if (actualPct > 100) return { label: '超過', tone: 'over', diff };
+  if (diff > 5) return { label: 'ハイペース', tone: 'fast', diff };
+  if (diff < -5) return { label: '余裕あり', tone: 'slow', diff };
+  return { label: '平均的', tone: 'normal', diff };
+}
