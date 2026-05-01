@@ -62,6 +62,59 @@ export async function getMonthlyTrend(
   return Promise.all(months.map((m) => getMonthSummary(m)));
 }
 
+/** YYYY-MM から年（YYYY）を取り出す */
+export function getYear(yearMonth: string): string {
+  return yearMonth.slice(0, 4);
+}
+
+/** その年の 1月から指定月までの月リストを返す */
+function listYtdMonths(yearMonth: string): string[] {
+  const year = getYear(yearMonth);
+  const months: string[] = [];
+  let cur = `${year}-01`;
+  while (cur <= yearMonth) {
+    months.push(cur);
+    cur = shiftMonth(cur, 1);
+  }
+  return months;
+}
+
+/**
+ * その年の1月〜selectedMonth までの累計サマリ（年初来 / Year-To-Date）。
+ * 集計ルールは getMonthSummary と同じ（isTarget && !isTransfer のみ）。
+ */
+export async function getYearToDateSummary(yearMonth: string): Promise<MonthSummary> {
+  const months = listYtdMonths(yearMonth);
+  const summaries = await Promise.all(months.map((m) => getMonthSummary(m)));
+  let income = 0;
+  let expense = 0;
+  let count = 0;
+  for (const s of summaries) {
+    income += s.income;
+    expense += s.expense;
+    count += s.count;
+  }
+  return { yearMonth, income, expense, balance: income - expense, count };
+}
+
+/**
+ * その年の1月〜selectedMonth までのカテゴリ別累計支出。
+ */
+export async function getCategoryBreakdownYTD(yearMonth: string): Promise<CategoryAgg[]> {
+  const months = listYtdMonths(yearMonth);
+  const perMonth = await Promise.all(months.map((m) => getCategoryBreakdown(m)));
+  const map = new Map<string, CategoryAgg>();
+  for (const list of perMonth) {
+    for (const c of list) {
+      const v = map.get(c.name) ?? { name: c.name, amount: 0, count: 0 };
+      v.amount += c.amount;
+      v.count += c.count;
+      map.set(c.name, v);
+    }
+  }
+  return [...map.values()].sort((a, b) => b.amount - a.amount);
+}
+
 export async function getCategoryBreakdown(yearMonth: string): Promise<CategoryAgg[]> {
   const rows = await loadMonth(yearMonth);
   const map = new Map<string, CategoryAgg>();
@@ -172,10 +225,7 @@ export async function getStoreTopForCategory(
   const rest = sorted.slice(topN - 1);
   const restAmount = rest.reduce((s, r) => s + r.amount, 0);
   const restCount = rest.reduce((s, r) => s + r.count, 0);
-  return [
-    ...top,
-    { name: `その他（${rest.length}件）`, amount: restAmount, count: restCount },
-  ];
+  return [...top, { name: `その他（${rest.length}件）`, amount: restAmount, count: restCount }];
 }
 
 /**

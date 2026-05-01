@@ -194,6 +194,42 @@ export function getTotalDefaultBudget(config: BudgetConfig | null): number {
   );
 }
 
+/**
+ * その年の特定カテゴリの年間予算（1月〜12月の月予算合計）。
+ * monthly[YYYY-MM][cat] の上書きがある月はそちらを採用、なければ default[cat]。
+ */
+export function getYearlyCategoryBudget(
+  config: BudgetConfig | null,
+  year: string,
+  categoryKey: string,
+): number {
+  if (!config) return 0;
+  let sum = 0;
+  for (let m = 1; m <= 12; m++) {
+    const ym = `${year}-${String(m).padStart(2, '0')}`;
+    sum += getMonthBudget(config, ym, categoryKey);
+  }
+  return sum;
+}
+
+/**
+ * その年の年間予算合計（全カテゴリ・全月の合計）。
+ */
+export function getYearlyTotalBudget(config: BudgetConfig | null, year: string): number {
+  if (!config) return 0;
+  // 全カテゴリ key を集める（default + その年の monthly）
+  const keys = new Set<string>(Object.keys(config.budgets.default));
+  for (let m = 1; m <= 12; m++) {
+    const ym = `${year}-${String(m).padStart(2, '0')}`;
+    for (const k of Object.keys(config.budgets.monthly[ym] ?? {})) keys.add(k);
+  }
+  let sum = 0;
+  for (const k of keys) {
+    sum += getYearlyCategoryBudget(config, year, k);
+  }
+  return sum;
+}
+
 export function getTotalMonthBudget(config: BudgetConfig | null, yearMonth: string): number {
   if (!config) return 0;
   // default をベースに monthly[ym] で上書き、その合計

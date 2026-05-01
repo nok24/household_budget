@@ -15,12 +15,15 @@ import { db } from '@/lib/db';
 import { syncDriveFolder } from '@/lib/sync';
 import {
   getCategoryBreakdown,
+  getCategoryBreakdownYTD,
   getMonthSummary,
   getMonthlyTrend,
   getRecentTransactionsForMonth,
+  getYear,
+  getYearToDateSummary,
   shiftMonth,
 } from '@/lib/aggregate';
-import { getMonthBudget, getTotalMonthBudget, orderCategories } from '@/lib/budget';
+import { getYearlyCategoryBudget, getYearlyTotalBudget, orderCategories } from '@/lib/budget';
 import { colorForCategory } from '@/lib/categories';
 import { getAssetDelta, getAssetSnapshotOrLatestBefore } from '@/lib/assets';
 import { computeMonthlyBalances, type MonthlyBalance } from '@/lib/accountBalance';
@@ -143,6 +146,7 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
     [selectedMonth],
     null,
   );
+  const ytdSummary = useLiveQuery(() => getYearToDateSummary(selectedMonth), [selectedMonth], null);
   const trend = useLiveQuery(() => getMonthlyTrend(selectedMonth, 12), [selectedMonth], []);
   const categories = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
   const recent = useLiveQuery(
@@ -187,7 +191,8 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
     [],
   );
 
-  const totalBudget = getTotalMonthBudget(budgetConfig, selectedMonth);
+  const year = getYear(selectedMonth);
+  const yearlyBudget = getYearlyTotalBudget(budgetConfig, year);
 
   if (totalCount === 0) {
     return (
@@ -273,15 +278,17 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
           label="支出"
           value={summary?.expense ?? 0}
           sub={
-            totalBudget > 0
-              ? `予算 ${formatYen(totalBudget)}`
+            yearlyBudget > 0 && ytdSummary
+              ? `今年累計 ${formatYen(ytdSummary.expense)} / 年間 ${formatYen(yearlyBudget)}`
               : prevSummary
                 ? `前月 ${formatYen(prevSummary.expense)}`
                 : '—'
           }
           delta={expDelta}
           progress={
-            totalBudget > 0 && summary ? { current: summary.expense, max: totalBudget } : undefined
+            yearlyBudget > 0 && ytdSummary
+              ? { current: ytdSummary.expense, max: yearlyBudget }
+              : undefined
           }
         />
         <KpiCard
@@ -469,23 +476,32 @@ function Legend({ items }: { items: { color: string; label: string }[] }) {
 
 function BudgetUsageCard({ selectedMonth }: { selectedMonth: string }) {
   const config = useBudgetStore((s) => s.config);
-  const breakdown = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
+  const ytdBreakdown = useLiveQuery(
+    () => getCategoryBreakdownYTD(selectedMonth),
+    [selectedMonth],
+    [],
+  );
+  const year = getYear(selectedMonth);
 
   // 予算が設定されているカテゴリ + 使用額があるカテゴリを order に従って表示
   const rows = (() => {
     if (!config) return [];
-    const expByCat = new Map(breakdown.map((b) => [b.name, b.amount]));
+    const expByCat = new Map(ytdBreakdown.map((b) => [b.name, b.amount]));
     const allCats = new Set<string>([
       ...Object.keys(config.budgets.default),
-      ...Object.keys(config.budgets.monthly[selectedMonth] ?? {}),
-      ...breakdown.map((b) => b.name),
+      ...ytdBreakdown.map((b) => b.name),
     ]);
+    // その年のいずれかの月で monthly 上書きがあるカテゴリも候補に
+    for (let m = 1; m <= 12; m++) {
+      const ym = `${year}-${String(m).padStart(2, '0')}`;
+      for (const k of Object.keys(config.budgets.monthly[ym] ?? {})) allCats.add(k);
+    }
     const ordered = orderCategories(config, allCats);
     return ordered
       .map((name) => ({
         name,
         spent: expByCat.get(name) ?? 0,
-        budget: getMonthBudget(config, selectedMonth, name),
+        budget: getYearlyCategoryBudget(config, year, name),
       }))
       .filter((r) => r.budget > 0 || r.spent > 0)
       .slice(0, 6);
@@ -493,7 +509,7 @@ function BudgetUsageCard({ selectedMonth }: { selectedMonth: string }) {
 
   return (
     <section className="card p-5">
-      <CardHead label="予算消化" />
+      <CardHead label={`予算消化 · 今年累計`} />
       {rows.length === 0 ? (
         <p className="text-xs text-ink-60">
           予算がまだ設定されていません。

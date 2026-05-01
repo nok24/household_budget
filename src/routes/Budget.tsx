@@ -7,11 +7,13 @@ import { useAuthStore } from '@/store/auth';
 import { useBudgetStore } from '@/store/budget';
 import { useFolderStore } from '@/store/folder';
 import { useUiStore } from '@/store/ui';
-import { getMonthBudget, getTotalMonthBudget, orderCategories } from '@/lib/budget';
+import { getYearlyCategoryBudget, getYearlyTotalBudget, orderCategories } from '@/lib/budget';
 import {
   getCategoryBreakdown,
+  getCategoryBreakdownYTD,
   getDistinctLargeCategoriesApplied,
-  getMonthSummary,
+  getYear,
+  getYearToDateSummary,
 } from '@/lib/aggregate';
 import { colorForCategory } from '@/lib/categories';
 import { cn, formatYen, formatPct } from '@/lib/utils';
@@ -134,13 +136,24 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
   // 候補カテゴリ: budget の default + monthly + 取引データ由来
   const knownCategoriesFromTx = useLiveQuery(() => getDistinctLargeCategoriesApplied(), [], []);
   const breakdown = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
-  const monthSummary = useLiveQuery(() => getMonthSummary(selectedMonth), [selectedMonth], null);
+  const ytdBreakdown = useLiveQuery(
+    () => getCategoryBreakdownYTD(selectedMonth),
+    [selectedMonth],
+    [],
+  );
+  const ytdSummary = useLiveQuery(() => getYearToDateSummary(selectedMonth), [selectedMonth], null);
 
   const expenseByCategory = useMemo(() => {
     const m = new Map<string, number>();
     for (const c of breakdown) m.set(c.name, c.amount);
     return m;
   }, [breakdown]);
+
+  const ytdByCategory = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of ytdBreakdown) m.set(c.name, c.amount);
+    return m;
+  }, [ytdBreakdown]);
 
   const categoryKeys = useMemo(() => {
     if (!config) return [];
@@ -154,9 +167,10 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
 
   if (!config) return null;
 
-  const totalBudget = getTotalMonthBudget(config, selectedMonth);
-  const totalSpent = monthSummary?.expense ?? 0;
-  const totalPct = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
+  const year = getYear(selectedMonth);
+  const yearlyBudget = getYearlyTotalBudget(config, year);
+  const ytdSpent = ytdSummary?.expense ?? 0;
+  const ytdPct = yearlyBudget > 0 ? (ytdSpent / yearlyBudget) * 100 : 0;
 
   function setBudget(category: string, scope: 'default' | 'monthly', value: number | null) {
     setConfig((prev) => {
@@ -186,22 +200,21 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
 
   return (
     <div className="space-y-4">
-      {/* 全体サマリ */}
+      {/* 全体サマリ（年間ベース） */}
       <section className="card p-5">
         <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
-          <h2 className="text-sm font-semibold tracking-wider text-ink-70">月全体</h2>
+          <h2 className="text-sm font-semibold tracking-wider text-ink-70">{year}年全体</h2>
           <div className="text-xs text-ink-60 tabular-nums">
-            支出 {formatYen(totalSpent)} / 予算 {totalBudget > 0 ? formatYen(totalBudget) : '—'}
-            {totalBudget > 0 && (
-              <span
-                className={cn('ml-2 font-medium', totalPct > 100 ? 'text-rose-700' : 'text-ink')}
-              >
-                {formatPct(totalPct)}
+            今年累計 {formatYen(ytdSpent)} / 年間予算{' '}
+            {yearlyBudget > 0 ? formatYen(yearlyBudget) : '—'}
+            {yearlyBudget > 0 && (
+              <span className={cn('ml-2 font-medium', ytdPct > 100 ? 'text-rose-700' : 'text-ink')}>
+                {formatPct(ytdPct)}
               </span>
             )}
           </div>
         </div>
-        <ProgressBar pct={totalPct} />
+        <ProgressBar pct={ytdPct} />
       </section>
 
       {/* カテゴリ別編集 */}
@@ -215,7 +228,7 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
               <th className="py-2 px-4 w-[160px]">
                 {dayjs(`${selectedMonth}-01`).format('M月')}のみ上書き
               </th>
-              <th className="py-2 px-4 w-[180px]">進捗</th>
+              <th className="py-2 px-4 w-[180px]">年間消化</th>
             </tr>
           </thead>
           <tbody>
@@ -226,7 +239,8 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
                 spent={expenseByCategory.get(cat) ?? 0}
                 defaultBudget={config.budgets.default[cat]}
                 monthOverride={config.budgets.monthly[selectedMonth]?.[cat]}
-                effective={getMonthBudget(config, selectedMonth, cat)}
+                ytdSpent={ytdByCategory.get(cat) ?? 0}
+                yearlyBudget={getYearlyCategoryBudget(config, year, cat)}
                 onSetDefault={(v) => setBudget(cat, 'default', v)}
                 onSetMonth={(v) => setBudget(cat, 'monthly', v)}
               />
@@ -256,7 +270,8 @@ function CategoryRow({
   spent,
   defaultBudget,
   monthOverride,
-  effective,
+  ytdSpent,
+  yearlyBudget,
   onSetDefault,
   onSetMonth,
 }: {
@@ -264,11 +279,12 @@ function CategoryRow({
   spent: number;
   defaultBudget: number | string | undefined;
   monthOverride: number | string | undefined;
-  effective: number;
+  ytdSpent: number;
+  yearlyBudget: number;
   onSetDefault: (v: number | null) => void;
   onSetMonth: (v: number | null) => void;
 }) {
-  const pct = effective > 0 ? (spent / effective) * 100 : 0;
+  const pct = yearlyBudget > 0 ? (ytdSpent / yearlyBudget) * 100 : 0;
   return (
     <tr className="border-b border-line last:border-0">
       <td className="py-2 px-4">
@@ -298,11 +314,11 @@ function CategoryRow({
         />
       </td>
       <td className="py-2 px-4">
-        {effective > 0 ? (
+        {yearlyBudget > 0 ? (
           <div className="space-y-1">
             <ProgressBar pct={pct} compact />
             <div className="text-[10px] text-ink-60 tabular-nums">
-              {formatPct(pct)} · 残 {formatYen(Math.max(0, effective - spent))}
+              {formatPct(pct)} · 累計 {formatYen(ytdSpent)} / {formatYen(yearlyBudget)}
             </div>
           </div>
         ) : (
