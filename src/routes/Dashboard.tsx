@@ -22,8 +22,8 @@ import {
 } from '@/lib/aggregate';
 import { getMonthBudget, getTotalMonthBudget, orderCategories } from '@/lib/budget';
 import { colorForCategory } from '@/lib/categories';
-import { getAssetDelta, getAssetSnapshot } from '@/lib/assets';
-import { computeMonthlyBalances } from '@/lib/accountBalance';
+import { getAssetDelta, getAssetSnapshotOrLatestBefore } from '@/lib/assets';
+import { computeMonthlyBalances, type MonthlyBalance } from '@/lib/accountBalance';
 import { cn, formatYen, formatPct } from '@/lib/utils';
 
 export default function Dashboard() {
@@ -150,8 +150,15 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
     [selectedMonth],
     [],
   );
-  const assetSnapshot = useLiveQuery(() => getAssetSnapshot(selectedMonth), [selectedMonth], null);
+  // 該当月にデータが無ければそれ以前の直近月にフォールバック（資産CSVは月末更新が遅れるケース対応）
+  const assetSnapshot = useLiveQuery(
+    () => getAssetSnapshotOrLatestBefore(selectedMonth),
+    [selectedMonth],
+    null,
+  );
+  // 前月比は当月と前月の両方が「正確に存在する」ときだけ意味を持つ
   const assetDelta = useLiveQuery(() => getAssetDelta(selectedMonth), [selectedMonth], null);
+  const assetSnapshotIsExact = assetSnapshot ? assetSnapshot.yearMonth === selectedMonth : false;
   const accountAnchors = useBudgetStore((s) => s.config?.accountAnchors);
   const accountBalances = useLiveQuery(
     async () => {
@@ -159,9 +166,19 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
       const series = await Promise.all(
         accountAnchors.map(async (a) => {
           const all = await computeMonthlyBalances(a);
-          const cur = all.find((s) => s.yearMonth === selectedMonth);
-          const prev = all.find((s) => s.yearMonth === shiftMonth(selectedMonth, -1));
-          return { anchor: a, current: cur, prev };
+          // 該当月が series に無ければ「それ以前で最新の月」を採用。
+          // pattern にマッチする取引が無いケースや、選択月が anchor 月より過去の
+          // ケースで series が短くなっても、KPI は表示できるようにする。
+          const findOrBefore = (ym: string): MonthlyBalance | undefined => {
+            const exact = all.find((s) => s.yearMonth === ym);
+            if (exact) return exact;
+            const candidates = all.filter((s) => s.yearMonth <= ym);
+            return candidates[candidates.length - 1];
+          };
+          const cur = findOrBefore(selectedMonth);
+          const prev = findOrBefore(shiftMonth(selectedMonth, -1));
+          const isExact = cur ? cur.yearMonth === selectedMonth : false;
+          return { anchor: a, current: cur, prev, isExact };
         }),
       );
       return series;
@@ -209,18 +226,21 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
               label="総資産"
               value={assetSnapshot.total}
               sub={
-                assetDelta
+                assetSnapshotIsExact && assetDelta
                   ? `前月比 ${assetDelta.total >= 0 ? '+' : '−'}${formatYen(Math.abs(assetDelta.total))}`
-                  : `月末 ${assetSnapshot.date.replaceAll('-', '/')}`
+                  : `${assetSnapshot.date.replaceAll('-', '/')} 時点`
               }
-              delta={totalAssetDeltaPct}
+              delta={assetSnapshotIsExact ? totalAssetDeltaPct : null}
             />
           )}
           {accountBalances.map((b) => {
             if (!b.current) return null;
-            const delta = b.prev !== undefined ? b.current.balance - b.prev.balance : null;
+            // 当月・前月とも正確な月のデータがあるときだけ「前月比」を出す
+            const exactPrev =
+              b.prev !== undefined && b.prev.yearMonth === shiftMonth(selectedMonth, -1);
+            const delta = b.isExact && exactPrev ? b.current.balance - b.prev!.balance : null;
             const deltaPct =
-              b.prev !== undefined && b.prev.balance !== 0 ? (delta! / b.prev.balance) * 100 : null;
+              delta !== null && b.prev!.balance !== 0 ? (delta / b.prev!.balance) * 100 : null;
             return (
               <KpiCard
                 key={b.anchor.id}
@@ -229,7 +249,9 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
                 sub={
                   delta !== null
                     ? `前月比 ${delta >= 0 ? '+' : '−'}${formatYen(Math.abs(delta))}`
-                    : `基準日 ${b.anchor.asOfDate.replaceAll('-', '/')}`
+                    : b.isExact
+                      ? `基準日 ${b.anchor.asOfDate.replaceAll('-', '/')}`
+                      : `${b.current.yearMonth} 末時点`
                 }
                 delta={deltaPct}
               />
