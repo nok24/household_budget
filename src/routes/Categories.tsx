@@ -13,9 +13,8 @@ import {
   getDayOfWeekAverageForCategory,
   getMonthSummary,
   getStoreTopForCategory,
-  getYear,
 } from '@/lib/aggregate';
-import { getYearlyCategoryBudget } from '@/lib/budget';
+import { getAnnualBudget } from '@/lib/budget';
 import { colorForCategory } from '@/lib/categories';
 import { cn, formatYen, formatPct } from '@/lib/utils';
 
@@ -116,7 +115,6 @@ function CategoryTable({
     for (const c of ytdBreakdown) m.set(c.name, c.amount);
     return m;
   }, [ytdBreakdown]);
-  const year = getYear(selectedMonth);
 
   return (
     <section className="card p-6">
@@ -143,7 +141,7 @@ function CategoryTable({
               amount={c.amount}
               totalExpense={totalExpense}
               ytdAmount={ytdByCategory.get(c.name) ?? 0}
-              yearlyBudget={getYearlyCategoryBudget(config, year, c.name)}
+              yearlyBudget={getAnnualBudget(config, c.name)}
               isActive={c.name === activeCategory}
               onClick={() => onSelect(c.name)}
               selectedMonth={selectedMonth}

@@ -60,8 +60,8 @@ export interface BudgetConfig {
   /** ユーザが指定するカテゴリの並び順（大項目名）。未掲載のカテゴリは末尾に名前順で並ぶ。*/
   categoryOrder: string[];
   budgets: {
-    default: Record<CategoryId, number>;
-    monthly: Record<string, Record<CategoryId, number | string>>; // "YYYY-MM"
+    /** カテゴリごとの年間予算（円）。月按分は annual / 12 で算出 */
+    annual: Record<CategoryId, number>;
   };
   /** 機関別残高アンカー（任意） */
   accountAnchors?: AccountAnchor[];

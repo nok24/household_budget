@@ -26,7 +26,7 @@ export const DEFAULT_BUDGET: BudgetConfig = {
   // categories は MF の大項目から自動拾い + ユーザ編集で育てる前提
   categories: [],
   categoryOrder: [],
-  budgets: { default: {}, monthly: {} },
+  budgets: { annual: {} },
   accountAnchors: [],
   settings: {
     fiscalMonthStartDay: 1,
@@ -121,6 +121,36 @@ export async function saveBudget(
   }
 }
 
+/**
+ * 旧スキーマ（budgets.default[cat] = 月予算 + monthly[ym][cat] = 月別上書き）
+ * からの自動マイグレーション。default × 12 を annual として採用。
+ * monthly 上書きは月単位の調整なので annual には合算せず捨てる（lossy）。
+ */
+type LegacyBudgets = {
+  default?: Record<string, number>;
+  monthly?: Record<string, Record<string, number | string>>;
+};
+
+function migrateBudgets(
+  loadedBudgets: LegacyBudgets | { annual?: Record<string, number> } | undefined,
+): { annual: Record<string, number> } {
+  if (!loadedBudgets) return { annual: {} };
+  if ('annual' in loadedBudgets && loadedBudgets.annual) {
+    return { annual: { ...loadedBudgets.annual } };
+  }
+  // 旧スキーマからのマイグレーション
+  const legacy = loadedBudgets as LegacyBudgets;
+  if (legacy.default) {
+    const annual: Record<string, number> = {};
+    for (const [k, v] of Object.entries(legacy.default)) {
+      const n = typeof v === 'number' ? v : 0;
+      if (n > 0) annual[k] = n * 12;
+    }
+    return { annual };
+  }
+  return { annual: {} };
+}
+
 function mergeWithDefaults(loaded: Partial<BudgetConfig>): BudgetConfig {
   return {
     version: 1,
@@ -128,10 +158,7 @@ function mergeWithDefaults(loaded: Partial<BudgetConfig>): BudgetConfig {
     members: loaded.members ?? structuredClone(DEFAULT_BUDGET.members),
     categories: loaded.categories ?? [],
     categoryOrder: loaded.categoryOrder ?? [],
-    budgets: {
-      default: loaded.budgets?.default ?? {},
-      monthly: loaded.budgets?.monthly ?? {},
-    },
+    budgets: migrateBudgets(loaded.budgets),
     accountAnchors: loaded.accountAnchors ?? [],
     settings: {
       fiscalMonthStartDay:
@@ -171,75 +198,23 @@ export function orderCategories(
   return [...ordered, ...remaining];
 }
 
-/**
- * 指定月の予算金額を返す。monthly[YYYY-MM] の上書きがあればそれ、なければ default。
- */
-export function getMonthBudget(
-  config: BudgetConfig | null,
-  yearMonth: string,
-  categoryKey: string,
-): number {
+/** カテゴリの年間予算（円）。未設定なら 0。 */
+export function getAnnualBudget(config: BudgetConfig | null, categoryKey: string): number {
   if (!config) return 0;
-  const monthlyOverride = config.budgets.monthly[yearMonth]?.[categoryKey];
-  if (typeof monthlyOverride === 'number') return monthlyOverride;
-  const def = config.budgets.default[categoryKey];
-  return typeof def === 'number' ? def : 0;
+  const v = config.budgets.annual[categoryKey];
+  return typeof v === 'number' ? v : 0;
 }
 
-export function getTotalDefaultBudget(config: BudgetConfig | null): number {
+/** 全カテゴリの年間予算合計。 */
+export function getAnnualTotalBudget(config: BudgetConfig | null): number {
   if (!config) return 0;
-  return Object.values(config.budgets.default).reduce(
+  return Object.values(config.budgets.annual).reduce(
     (sum, v) => sum + (typeof v === 'number' ? v : 0),
     0,
   );
 }
 
-/**
- * その年の特定カテゴリの年間予算（1月〜12月の月予算合計）。
- * monthly[YYYY-MM][cat] の上書きがある月はそちらを採用、なければ default[cat]。
- */
-export function getYearlyCategoryBudget(
-  config: BudgetConfig | null,
-  year: string,
-  categoryKey: string,
-): number {
-  if (!config) return 0;
-  let sum = 0;
-  for (let m = 1; m <= 12; m++) {
-    const ym = `${year}-${String(m).padStart(2, '0')}`;
-    sum += getMonthBudget(config, ym, categoryKey);
-  }
-  return sum;
-}
-
-/**
- * その年の年間予算合計（全カテゴリ・全月の合計）。
- */
-export function getYearlyTotalBudget(config: BudgetConfig | null, year: string): number {
-  if (!config) return 0;
-  // 全カテゴリ key を集める（default + その年の monthly）
-  const keys = new Set<string>(Object.keys(config.budgets.default));
-  for (let m = 1; m <= 12; m++) {
-    const ym = `${year}-${String(m).padStart(2, '0')}`;
-    for (const k of Object.keys(config.budgets.monthly[ym] ?? {})) keys.add(k);
-  }
-  let sum = 0;
-  for (const k of keys) {
-    sum += getYearlyCategoryBudget(config, year, k);
-  }
-  return sum;
-}
-
-export function getTotalMonthBudget(config: BudgetConfig | null, yearMonth: string): number {
-  if (!config) return 0;
-  // default をベースに monthly[ym] で上書き、その合計
-  const keys = new Set<string>([
-    ...Object.keys(config.budgets.default),
-    ...Object.keys(config.budgets.monthly[yearMonth] ?? {}),
-  ]);
-  let sum = 0;
-  for (const k of keys) {
-    sum += getMonthBudget(config, yearMonth, k);
-  }
-  return sum;
+/** 月按分（年間 / 12）。表示用の参考値で、データには持たない。 */
+export function getMonthlyAllocated(config: BudgetConfig | null, categoryKey: string): number {
+  return getAnnualBudget(config, categoryKey) / 12;
 }

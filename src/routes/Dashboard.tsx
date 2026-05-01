@@ -19,11 +19,10 @@ import {
   getMonthSummary,
   getMonthlyTrend,
   getRecentTransactionsForMonth,
-  getYear,
   getYearToDateSummary,
   shiftMonth,
 } from '@/lib/aggregate';
-import { getYearlyCategoryBudget, getYearlyTotalBudget, orderCategories } from '@/lib/budget';
+import { getAnnualBudget, getAnnualTotalBudget, orderCategories } from '@/lib/budget';
 import { colorForCategory } from '@/lib/categories';
 import { getAssetDelta, getAssetSnapshotOrLatestBefore } from '@/lib/assets';
 import { computeMonthlyBalances, type MonthlyBalance } from '@/lib/accountBalance';
@@ -191,8 +190,7 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
     [],
   );
 
-  const year = getYear(selectedMonth);
-  const yearlyBudget = getYearlyTotalBudget(budgetConfig, year);
+  const yearlyBudget = getAnnualTotalBudget(budgetConfig);
 
   if (totalCount === 0) {
     return (
@@ -481,27 +479,21 @@ function BudgetUsageCard({ selectedMonth }: { selectedMonth: string }) {
     [selectedMonth],
     [],
   );
-  const year = getYear(selectedMonth);
 
   // 予算が設定されているカテゴリ + 使用額があるカテゴリを order に従って表示
   const rows = (() => {
     if (!config) return [];
     const expByCat = new Map(ytdBreakdown.map((b) => [b.name, b.amount]));
     const allCats = new Set<string>([
-      ...Object.keys(config.budgets.default),
+      ...Object.keys(config.budgets.annual),
       ...ytdBreakdown.map((b) => b.name),
     ]);
-    // その年のいずれかの月で monthly 上書きがあるカテゴリも候補に
-    for (let m = 1; m <= 12; m++) {
-      const ym = `${year}-${String(m).padStart(2, '0')}`;
-      for (const k of Object.keys(config.budgets.monthly[ym] ?? {})) allCats.add(k);
-    }
     const ordered = orderCategories(config, allCats);
     return ordered
       .map((name) => ({
         name,
         spent: expByCat.get(name) ?? 0,
-        budget: getYearlyCategoryBudget(config, year, name),
+        budget: getAnnualBudget(config, name),
       }))
       .filter((r) => r.budget > 0 || r.spent > 0)
       .slice(0, 6);
