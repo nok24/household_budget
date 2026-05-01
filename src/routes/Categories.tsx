@@ -8,12 +8,14 @@ import { useBudgetStore } from '@/store/budget';
 import { useUiStore } from '@/store/ui';
 import {
   getCategoryBreakdown,
+  getCategoryBreakdownYTD,
   getCategoryMonthlyTrend,
   getDayOfWeekAverageForCategory,
   getMonthSummary,
   getStoreTopForCategory,
 } from '@/lib/aggregate';
-import { getMonthBudget } from '@/lib/budget';
+import { getAnnualBudget, getExpectedPaceAtMonth, judgePace } from '@/lib/budget';
+import PaceBadge from '@/components/PaceBadge';
 import { colorForCategory } from '@/lib/categories';
 import { cn, formatYen, formatPct } from '@/lib/utils';
 
@@ -104,19 +106,29 @@ function CategoryTable({
   selectedMonth: string;
 }) {
   const config = useBudgetStore((s) => s.config);
+  const ytdBreakdown = useLiveQuery(
+    () => getCategoryBreakdownYTD(selectedMonth),
+    [selectedMonth],
+    [],
+  );
+  const ytdByCategory = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of ytdBreakdown) m.set(c.name, c.amount);
+    return m;
+  }, [ytdBreakdown]);
 
   return (
     <section className="card p-6">
       <div className="text-[11px] tracking-[0.1em] text-ink-40 mb-4 font-medium">
-        カテゴリ別 · 推移と予算
+        カテゴリ別 · 推移と年間予算
       </div>
       <div className="grid grid-cols-[24px_140px_60px_1fr_90px_70px] gap-2.5 text-[10px] tracking-[0.06em] text-ink-40 pb-2 border-b border-line">
         <span />
         <span>カテゴリ</span>
         <span className="text-right">占有率</span>
         <span>12ヶ月推移</span>
-        <span className="text-right">支出</span>
-        <span className="text-right">予算比</span>
+        <span className="text-right">今月支出</span>
+        <span className="text-right">年間消化</span>
       </div>
       {breakdown.length === 0 ? (
         <div className="py-8 text-center text-sm text-ink-60">支出データがありません</div>
@@ -129,7 +141,8 @@ function CategoryTable({
               category={c.name}
               amount={c.amount}
               totalExpense={totalExpense}
-              budget={getMonthBudget(config, selectedMonth, c.name)}
+              ytdAmount={ytdByCategory.get(c.name) ?? 0}
+              yearlyBudget={getAnnualBudget(config, c.name)}
               isActive={c.name === activeCategory}
               onClick={() => onSelect(c.name)}
               selectedMonth={selectedMonth}
@@ -144,7 +157,8 @@ function CategoryRow({
   category,
   amount,
   totalExpense,
-  budget,
+  ytdAmount,
+  yearlyBudget,
   isActive,
   onClick,
   selectedMonth,
@@ -152,7 +166,8 @@ function CategoryRow({
   category: string;
   amount: number;
   totalExpense: number;
-  budget: number;
+  ytdAmount: number;
+  yearlyBudget: number;
   isActive: boolean;
   onClick: () => void;
   selectedMonth: string;
@@ -164,7 +179,9 @@ function CategoryRow({
   );
   const sparkData = trend.map((t) => t.amount);
   const occupancy = totalExpense > 0 ? (amount / totalExpense) * 100 : 0;
-  const budgetPct = budget > 0 ? (amount / budget) * 100 : 0;
+  const budgetPct = yearlyBudget > 0 ? (ytdAmount / yearlyBudget) * 100 : 0;
+  const expectedPct = getExpectedPaceAtMonth(selectedMonth);
+  const pace = yearlyBudget > 0 ? judgePace(budgetPct, expectedPct) : null;
   const color = colorForCategory(category);
 
   let budgetColor = 'text-accent';
@@ -195,8 +212,26 @@ function CategoryRow({
         accent={color}
       />
       <span className="text-right tabular-nums font-medium">{formatYen(amount)}</span>
-      <span className={cn('text-right tabular-nums text-[11px] font-medium', budgetColor)}>
-        {budget > 0 ? formatPct(budgetPct, 0) : '—'}
+      <span
+        className="text-right tabular-nums text-[11px] flex flex-col items-end gap-0.5"
+        title={
+          yearlyBudget > 0
+            ? `今年累計 ${formatYen(ytdAmount)} / 年間予算 ${formatYen(yearlyBudget)} · 期待 ${formatPct(expectedPct)}`
+            : undefined
+        }
+      >
+        {yearlyBudget > 0 ? (
+          <>
+            <span className={cn('font-medium', budgetColor)}>{formatPct(budgetPct, 0)}</span>
+            {pace && (
+              <PaceBadge tone={pace.tone} compact>
+                {pace.label}
+              </PaceBadge>
+            )}
+          </>
+        ) : (
+          <span className="text-ink-40">—</span>
+        )}
       </span>
     </button>
   );

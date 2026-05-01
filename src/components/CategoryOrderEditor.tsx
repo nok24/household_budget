@@ -40,7 +40,7 @@ export default function CategoryOrderEditor() {
     if (!config) return [];
     const all = new Set<string>([
       ...(config.categoryOrder ?? []),
-      ...Object.keys(config.budgets.default),
+      ...Object.keys(config.budgets.annual),
       ...known,
     ]);
     return orderCategories(config, all);
@@ -87,23 +87,11 @@ export default function CategoryOrderEditor() {
           カテゴリがまだありません。データを同期するとMFのCSVから自動的に拾われます。
         </p>
       ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={allCategories}
-            strategy={verticalListSortingStrategy}
-          >
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={allCategories} strategy={verticalListSortingStrategy}>
             <ul className="space-y-1">
               {allCategories.map((c, i) => (
-                <SortableRow
-                  key={c}
-                  id={c}
-                  index={i}
-                  inOrder={orderSet.has(c)}
-                />
+                <SortableRow key={c} id={c} index={i} inOrder={orderSet.has(c)} />
               ))}
             </ul>
           </SortableContext>
@@ -139,17 +127,10 @@ export default function CategoryOrderEditor() {
   );
 }
 
-function SortableRow({
-  id,
-  index,
-  inOrder,
-}: {
-  id: string;
-  index: number;
-  inOrder: boolean;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id });
+function SortableRow({ id, index, inOrder }: { id: string; index: number; inOrder: boolean }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -171,9 +152,7 @@ function SortableRow({
       <span className="text-ink-40 text-base leading-none w-4 text-center" aria-hidden>
         ⋮⋮
       </span>
-      <span className="text-[10px] tabular-nums text-ink-40 w-6 text-right">
-        {index + 1}
-      </span>
+      <span className="text-[10px] tabular-nums text-ink-40 w-6 text-right">{index + 1}</span>
       <span
         className="text-[11px] px-1.5 py-0.5 rounded-sm"
         style={{
@@ -184,9 +163,7 @@ function SortableRow({
         {id}
       </span>
       <span className="flex-1" />
-      {!inOrder && (
-        <span className="text-[10px] text-ink-40">未配置（保存で確定）</span>
-      )}
+      {!inOrder && <span className="text-[10px] text-ink-40">未配置（保存で確定）</span>}
     </li>
   );
 }

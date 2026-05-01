@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import dayjs from 'dayjs';
 import FolderPickerButton from '@/components/FolderPickerButton';
 import MonthSwitcher from '@/components/MonthSwitcher';
+import PaceBadge from '@/components/PaceBadge';
 import ProgressBar from '@/components/ProgressBar';
 import TrendBarChart from '@/components/charts/TrendBarChart';
 import CategoryDonut from '@/components/charts/CategoryDonut';
@@ -15,14 +16,23 @@ import { db } from '@/lib/db';
 import { syncDriveFolder } from '@/lib/sync';
 import {
   getCategoryBreakdown,
+  getCategoryBreakdownYTD,
   getMonthSummary,
   getMonthlyTrend,
   getRecentTransactionsForMonth,
+  getYearToDateSummary,
   shiftMonth,
 } from '@/lib/aggregate';
-import { getMonthBudget, getTotalMonthBudget, orderCategories } from '@/lib/budget';
+import {
+  getAnnualBudget,
+  getAnnualTotalBudget,
+  getExpectedPaceAtMonth,
+  judgePace,
+  orderCategories,
+} from '@/lib/budget';
 import { colorForCategory } from '@/lib/categories';
-import { getAssetDelta, getAssetSnapshot } from '@/lib/assets';
+import { getAssetDelta, getAssetSnapshotOrLatestBefore } from '@/lib/assets';
+import { computeMonthlyBalances, type MonthlyBalance } from '@/lib/accountBalance';
 import { cn, formatYen, formatPct } from '@/lib/utils';
 
 export default function Dashboard() {
@@ -142,6 +152,7 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
     [selectedMonth],
     null,
   );
+  const ytdSummary = useLiveQuery(() => getYearToDateSummary(selectedMonth), [selectedMonth], null);
   const trend = useLiveQuery(() => getMonthlyTrend(selectedMonth, 12), [selectedMonth], []);
   const categories = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
   const recent = useLiveQuery(
@@ -149,10 +160,44 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
     [selectedMonth],
     [],
   );
-  const assetSnapshot = useLiveQuery(() => getAssetSnapshot(selectedMonth), [selectedMonth], null);
+  // 該当月にデータが無ければそれ以前の直近月にフォールバック（資産CSVは月末更新が遅れるケース対応）
+  const assetSnapshot = useLiveQuery(
+    () => getAssetSnapshotOrLatestBefore(selectedMonth),
+    [selectedMonth],
+    null,
+  );
+  // 前月比は当月と前月の両方が「正確に存在する」ときだけ意味を持つ
   const assetDelta = useLiveQuery(() => getAssetDelta(selectedMonth), [selectedMonth], null);
+  const assetSnapshotIsExact = assetSnapshot ? assetSnapshot.yearMonth === selectedMonth : false;
+  const accountAnchors = useBudgetStore((s) => s.config?.accountAnchors);
+  const accountBalances = useLiveQuery(
+    async () => {
+      if (!accountAnchors || accountAnchors.length === 0) return [];
+      const series = await Promise.all(
+        accountAnchors.map(async (a) => {
+          const all = await computeMonthlyBalances(a);
+          // 該当月が series に無ければ「それ以前で最新の月」を採用。
+          // pattern にマッチする取引が無いケースや、選択月が anchor 月より過去の
+          // ケースで series が短くなっても、KPI は表示できるようにする。
+          const findOrBefore = (ym: string): MonthlyBalance | undefined => {
+            const exact = all.find((s) => s.yearMonth === ym);
+            if (exact) return exact;
+            const candidates = all.filter((s) => s.yearMonth <= ym);
+            return candidates[candidates.length - 1];
+          };
+          const cur = findOrBefore(selectedMonth);
+          const prev = findOrBefore(shiftMonth(selectedMonth, -1));
+          const isExact = cur ? cur.yearMonth === selectedMonth : false;
+          return { anchor: a, current: cur, prev, isExact };
+        }),
+      );
+      return series;
+    },
+    [accountAnchors, selectedMonth],
+    [],
+  );
 
-  const totalBudget = getTotalMonthBudget(budgetConfig, selectedMonth);
+  const yearlyBudget = getAnnualTotalBudget(budgetConfig);
 
   if (totalCount === 0) {
     return (
@@ -181,21 +226,51 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
       ? (assetDelta.total / (assetSnapshot.total - assetDelta.total)) * 100
       : null;
 
+  const expectedPct = getExpectedPaceAtMonth(selectedMonth);
+  const ytdPct = yearlyBudget > 0 && ytdSummary ? (ytdSummary.expense / yearlyBudget) * 100 : 0;
+  const paceVerdict = yearlyBudget > 0 && ytdSummary ? judgePace(ytdPct, expectedPct) : null;
+
   return (
     <div className="space-y-4">
-      {/* 資産 KPI（資産フォルダ設定時のみ） */}
-      {assetSnapshot && (
+      {/* 資産 KPI（資産フォルダ + 口座アンカー設定時のみ） */}
+      {(assetSnapshot || accountBalances.some((b) => b.current)) && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard
-            label="総資産"
-            value={assetSnapshot.total}
-            sub={
-              assetDelta
-                ? `前月比 ${assetDelta.total >= 0 ? '+' : '−'}${formatYen(Math.abs(assetDelta.total))}`
-                : `月末 ${assetSnapshot.date.replaceAll('-', '/')}`
-            }
-            delta={totalAssetDeltaPct}
-          />
+          {assetSnapshot && (
+            <KpiCard
+              label="総資産"
+              value={assetSnapshot.total}
+              sub={
+                assetSnapshotIsExact && assetDelta
+                  ? `前月比 ${assetDelta.total >= 0 ? '+' : '−'}${formatYen(Math.abs(assetDelta.total))}`
+                  : `${assetSnapshot.date.replaceAll('-', '/')} 時点`
+              }
+              delta={assetSnapshotIsExact ? totalAssetDeltaPct : null}
+            />
+          )}
+          {accountBalances.map((b) => {
+            if (!b.current) return null;
+            // 当月・前月とも正確な月のデータがあるときだけ「前月比」を出す
+            const exactPrev =
+              b.prev !== undefined && b.prev.yearMonth === shiftMonth(selectedMonth, -1);
+            const delta = b.isExact && exactPrev ? b.current.balance - b.prev!.balance : null;
+            const deltaPct =
+              delta !== null && b.prev!.balance !== 0 ? (delta / b.prev!.balance) * 100 : null;
+            return (
+              <KpiCard
+                key={b.anchor.id}
+                label={`${b.anchor.label}（推定）`}
+                value={b.current.balance}
+                sub={
+                  delta !== null
+                    ? `前月比 ${delta >= 0 ? '+' : '−'}${formatYen(Math.abs(delta))}`
+                    : b.isExact
+                      ? `基準日 ${b.anchor.asOfDate.replaceAll('-', '/')}`
+                      : `${b.current.yearMonth} 末時点`
+                }
+                delta={deltaPct}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -212,15 +287,22 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
           label="支出"
           value={summary?.expense ?? 0}
           sub={
-            totalBudget > 0
-              ? `予算 ${formatYen(totalBudget)}`
+            yearlyBudget > 0 && ytdSummary
+              ? `今年累計 ${formatYen(ytdSummary.expense)} / 年間 ${formatYen(yearlyBudget)}`
               : prevSummary
                 ? `前月 ${formatYen(prevSummary.expense)}`
                 : '—'
           }
           delta={expDelta}
           progress={
-            totalBudget > 0 && summary ? { current: summary.expense, max: totalBudget } : undefined
+            yearlyBudget > 0 && ytdSummary
+              ? { current: ytdSummary.expense, max: yearlyBudget }
+              : undefined
+          }
+          pace={
+            paceVerdict
+              ? { label: paceVerdict.label, tone: paceVerdict.tone, expected: expectedPct }
+              : undefined
           }
         />
         <KpiCard
@@ -307,6 +389,8 @@ interface KpiCardProps {
   numeric?: boolean;
   customDisplay?: string;
   progress?: { current: number; max: number };
+  /** 進捗バー下に表示するペースバッジ。年間予算消化のときだけ渡す。 */
+  pace?: { label: string; tone: 'over' | 'fast' | 'normal' | 'slow'; expected: number };
 }
 
 function KpiCard({
@@ -320,6 +404,7 @@ function KpiCard({
   numeric,
   customDisplay,
   progress,
+  pace,
 }: KpiCardProps) {
   let deltaColor = 'text-ink-60';
   let deltaSign = '';
@@ -367,15 +452,17 @@ function KpiCard({
       {pct !== null && (
         <div className="mt-3 space-y-1">
           <ProgressBar pct={pct} compact />
-          <div className="text-[10px] text-ink-60 tabular-nums">
+          <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-ink-60 tabular-nums">
+            {pace && <PaceBadge tone={pace.tone}>{pace.label}</PaceBadge>}
             {overage > 0 ? (
               <span className="text-rose-700 font-medium">
                 {formatPct(pct)} · 超過 {formatYen(overage)}
               </span>
             ) : (
-              <>
+              <span>
                 {formatPct(pct)} 消化 · 残 {formatYen(remaining)}
-              </>
+                {pace && <span className="text-ink-40"> · 期待 {formatPct(pace.expected)}</span>}
+              </span>
             )}
           </div>
         </div>
@@ -408,23 +495,27 @@ function Legend({ items }: { items: { color: string; label: string }[] }) {
 
 function BudgetUsageCard({ selectedMonth }: { selectedMonth: string }) {
   const config = useBudgetStore((s) => s.config);
-  const breakdown = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
+  const ytdBreakdown = useLiveQuery(
+    () => getCategoryBreakdownYTD(selectedMonth),
+    [selectedMonth],
+    [],
+  );
+  const expectedPct = getExpectedPaceAtMonth(selectedMonth);
 
   // 予算が設定されているカテゴリ + 使用額があるカテゴリを order に従って表示
   const rows = (() => {
     if (!config) return [];
-    const expByCat = new Map(breakdown.map((b) => [b.name, b.amount]));
+    const expByCat = new Map(ytdBreakdown.map((b) => [b.name, b.amount]));
     const allCats = new Set<string>([
-      ...Object.keys(config.budgets.default),
-      ...Object.keys(config.budgets.monthly[selectedMonth] ?? {}),
-      ...breakdown.map((b) => b.name),
+      ...Object.keys(config.budgets.annual),
+      ...ytdBreakdown.map((b) => b.name),
     ]);
     const ordered = orderCategories(config, allCats);
     return ordered
       .map((name) => ({
         name,
         spent: expByCat.get(name) ?? 0,
-        budget: getMonthBudget(config, selectedMonth, name),
+        budget: getAnnualBudget(config, name),
       }))
       .filter((r) => r.budget > 0 || r.spent > 0)
       .slice(0, 6);
@@ -432,7 +523,7 @@ function BudgetUsageCard({ selectedMonth }: { selectedMonth: string }) {
 
   return (
     <section className="card p-5">
-      <CardHead label="予算消化" />
+      <CardHead label={`予算消化 · 今年累計`} />
       {rows.length === 0 ? (
         <p className="text-xs text-ink-60">
           予算がまだ設定されていません。
@@ -444,10 +535,18 @@ function BudgetUsageCard({ selectedMonth }: { selectedMonth: string }) {
           {rows.map((r) => {
             const p = r.budget > 0 ? (r.spent / r.budget) * 100 : 0;
             const over = p > 100;
+            const pace = r.budget > 0 ? judgePace(p, expectedPct) : null;
             return (
               <div key={r.name}>
-                <div className="flex justify-between text-[11px] mb-1">
-                  <span>{r.name}</span>
+                <div className="flex justify-between items-center text-[11px] mb-1 gap-2">
+                  <span className="flex items-center gap-1.5">
+                    <span>{r.name}</span>
+                    {pace && (
+                      <PaceBadge tone={pace.tone} compact>
+                        {pace.label}
+                      </PaceBadge>
+                    )}
+                  </span>
                   <span
                     className={cn(
                       'tabular-nums',

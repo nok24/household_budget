@@ -4,6 +4,7 @@ import {
   createJsonFile,
   findConfigFile,
   getFileMeta,
+  isAppNotAuthorizedToFile,
   readJsonFile,
   updateJsonFile,
   type ConfigFileMeta,
@@ -25,7 +26,8 @@ export const DEFAULT_BUDGET: BudgetConfig = {
   // categories は MF の大項目から自動拾い + ユーザ編集で育てる前提
   categories: [],
   categoryOrder: [],
-  budgets: { default: {}, monthly: {} },
+  budgets: { annual: {} },
+  accountAnchors: [],
   settings: {
     fiscalMonthStartDay: 1,
     incomeCategoryId: '_income',
@@ -87,12 +89,7 @@ export async function loadOrInitBudget(
   }
 
   // 新規作成
-  const created = await createJsonFile(
-    accessToken,
-    folderId,
-    BUDGET_FILE_NAME,
-    DEFAULT_BUDGET,
-  );
+  const created = await createJsonFile(accessToken, folderId, BUDGET_FILE_NAME, DEFAULT_BUDGET);
   await setCachedFileId(created.id);
   return { config: structuredClone(DEFAULT_BUDGET), meta: created, isNew: true };
 }
@@ -102,9 +99,56 @@ export async function saveBudget(
   fileId: string,
   config: BudgetConfig,
 ): Promise<ConfigFileMeta> {
-  const meta = await updateJsonFile(accessToken, fileId, config);
-  await setCachedFileId(meta.id);
-  return meta;
+  try {
+    const meta = await updateJsonFile(accessToken, fileId, config);
+    await setCachedFileId(meta.id);
+    return meta;
+  } catch (e) {
+    if (!isAppNotAuthorizedToFile(e)) throw e;
+    // 既存 budget.json はアプリ所有でない（手動配置 or 別クライアントID 由来）。
+    // 同フォルダにアプリ所有の新規ファイルを作成してそちらに書き込む。
+    // 古いファイルは drive.file スコープでは削除できないので、ユーザに手動削除を促す。
+    const folderRow = await db.meta.get(FOLDER_ID_KEY);
+    const folderId = typeof folderRow?.value === 'string' ? folderRow.value : null;
+    if (!folderId) throw e;
+    console.warn(
+      `[budget] update 403 → fallback to create new ${BUDGET_FILE_NAME}. ` +
+        `古い ${BUDGET_FILE_NAME} は Drive 上に残るので、確認後に手動で削除してください。`,
+    );
+    const created = await createJsonFile(accessToken, folderId, BUDGET_FILE_NAME, config);
+    await setCachedFileId(created.id);
+    return created;
+  }
+}
+
+/**
+ * 旧スキーマ（budgets.default[cat] = 月予算 + monthly[ym][cat] = 月別上書き）
+ * からの自動マイグレーション。default × 12 を annual として採用。
+ * monthly 上書きは月単位の調整なので annual には合算せず捨てる（lossy）。
+ */
+type LegacyBudgets = {
+  default?: Record<string, number>;
+  monthly?: Record<string, Record<string, number | string>>;
+};
+
+function migrateBudgets(
+  loadedBudgets: LegacyBudgets | { annual?: Record<string, number> } | undefined,
+): { annual: Record<string, number> } {
+  if (!loadedBudgets) return { annual: {} };
+  if ('annual' in loadedBudgets && loadedBudgets.annual) {
+    return { annual: { ...loadedBudgets.annual } };
+  }
+  // 旧スキーマからのマイグレーション
+  const legacy = loadedBudgets as LegacyBudgets;
+  if (legacy.default) {
+    const annual: Record<string, number> = {};
+    for (const [k, v] of Object.entries(legacy.default)) {
+      const n = typeof v === 'number' ? v : 0;
+      if (n > 0) annual[k] = n * 12;
+    }
+    return { annual };
+  }
+  return { annual: {} };
 }
 
 function mergeWithDefaults(loaded: Partial<BudgetConfig>): BudgetConfig {
@@ -114,10 +158,8 @@ function mergeWithDefaults(loaded: Partial<BudgetConfig>): BudgetConfig {
     members: loaded.members ?? structuredClone(DEFAULT_BUDGET.members),
     categories: loaded.categories ?? [],
     categoryOrder: loaded.categoryOrder ?? [],
-    budgets: {
-      default: loaded.budgets?.default ?? {},
-      monthly: loaded.budgets?.monthly ?? {},
-    },
+    budgets: migrateBudgets(loaded.budgets),
+    accountAnchors: loaded.accountAnchors ?? [],
     settings: {
       fiscalMonthStartDay:
         loaded.settings?.fiscalMonthStartDay ?? DEFAULT_BUDGET.settings.fiscalMonthStartDay,
@@ -152,48 +194,59 @@ export function orderCategories(
       seen.add(c);
     }
   }
-  const remaining = [...set]
-    .filter((c) => !seen.has(c))
-    .sort((a, b) => a.localeCompare(b, 'ja'));
+  const remaining = [...set].filter((c) => !seen.has(c)).sort((a, b) => a.localeCompare(b, 'ja'));
   return [...ordered, ...remaining];
 }
 
-/**
- * 指定月の予算金額を返す。monthly[YYYY-MM] の上書きがあればそれ、なければ default。
- */
-export function getMonthBudget(
-  config: BudgetConfig | null,
-  yearMonth: string,
-  categoryKey: string,
-): number {
+/** カテゴリの年間予算（円）。未設定なら 0。 */
+export function getAnnualBudget(config: BudgetConfig | null, categoryKey: string): number {
   if (!config) return 0;
-  const monthlyOverride = config.budgets.monthly[yearMonth]?.[categoryKey];
-  if (typeof monthlyOverride === 'number') return monthlyOverride;
-  const def = config.budgets.default[categoryKey];
-  return typeof def === 'number' ? def : 0;
+  const v = config.budgets.annual[categoryKey];
+  return typeof v === 'number' ? v : 0;
 }
 
-export function getTotalDefaultBudget(config: BudgetConfig | null): number {
+/** 全カテゴリの年間予算合計。 */
+export function getAnnualTotalBudget(config: BudgetConfig | null): number {
   if (!config) return 0;
-  return Object.values(config.budgets.default).reduce(
+  return Object.values(config.budgets.annual).reduce(
     (sum, v) => sum + (typeof v === 'number' ? v : 0),
     0,
   );
 }
 
-export function getTotalMonthBudget(
-  config: BudgetConfig | null,
-  yearMonth: string,
-): number {
-  if (!config) return 0;
-  // default をベースに monthly[ym] で上書き、その合計
-  const keys = new Set<string>([
-    ...Object.keys(config.budgets.default),
-    ...Object.keys(config.budgets.monthly[yearMonth] ?? {}),
-  ]);
-  let sum = 0;
-  for (const k of keys) {
-    sum += getMonthBudget(config, yearMonth, k);
-  }
-  return sum;
+/** 月按分（年間 / 12）。表示用の参考値で、データには持たない。 */
+export function getMonthlyAllocated(config: BudgetConfig | null, categoryKey: string): number {
+  return getAnnualBudget(config, categoryKey) / 12;
+}
+
+/**
+ * その月末時点で「平均ペース」だと年間予算の何%消化していれば順当かを返す。
+ * 月単位の単純按分: M月末なら M/12 × 100。
+ */
+export function getExpectedPaceAtMonth(yearMonth: string): number {
+  const monthIdx = parseInt(yearMonth.slice(5, 7), 10);
+  if (!Number.isFinite(monthIdx) || monthIdx < 1 || monthIdx > 12) return 0;
+  return (monthIdx / 12) * 100;
+}
+
+export type PaceTone = 'over' | 'fast' | 'normal' | 'slow';
+
+export interface PaceVerdict {
+  label: string;
+  tone: PaceTone;
+  /** 期待ペースに対する差分 (pt) */
+  diff: number;
+}
+
+/**
+ * 実消化率と期待ペースを比べてラベル + 色味を返す。
+ * しきい値は ±5pt を「平均的」、それ以上の乖離をハイ/スローに振り分け。
+ * 100% を超えていれば常に「超過」。
+ */
+export function judgePace(actualPct: number, expectedPct: number): PaceVerdict {
+  const diff = actualPct - expectedPct;
+  if (actualPct > 100) return { label: '超過', tone: 'over', diff };
+  if (diff > 5) return { label: 'ハイペース', tone: 'fast', diff };
+  if (diff < -5) return { label: '余裕あり', tone: 'slow', diff };
+  return { label: '平均的', tone: 'normal', diff };
 }

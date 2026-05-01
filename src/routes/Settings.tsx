@@ -4,6 +4,7 @@ import FolderPickerButton from '@/components/FolderPickerButton';
 import DiagnosticsPanel from '@/components/DiagnosticsPanel';
 import CategoryOrderEditor from '@/components/CategoryOrderEditor';
 import MemberEditor from '@/components/MemberEditor';
+import AccountAnchorEditor from '@/components/AccountAnchorEditor';
 import { useAuthStore } from '@/store/auth';
 import { useFolderStore } from '@/store/folder';
 import { useSyncStore } from '@/store/sync';
@@ -161,6 +162,18 @@ export default function Settings() {
           </p>
         </div>
         <MemberEditor />
+      </section>
+
+      <section className="card p-6 space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold tracking-wider text-ink-70">口座別残高アンカー</h2>
+          <p className="text-xs text-ink-60 mt-1">
+            特定の機関の残高をある日付の値で「アンカー」として固定すると、取引データの
+            収支を遡って各月末の推定残高を算出します。ダッシュボードに当月末の推定残高が
+            表示されます。
+          </p>
+        </div>
+        <AccountAnchorEditor />
       </section>
 
       <section className="card p-6 space-y-3">
