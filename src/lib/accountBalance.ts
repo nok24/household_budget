@@ -1,3 +1,4 @@
+import dayjs from 'dayjs';
 import { db, type DbTransaction } from './db';
 import { applyOverridesToRows } from './overrides';
 import { shiftMonth } from './aggregate';
@@ -55,31 +56,45 @@ function lastDateOfMonth(yearMonth: string): string {
   return `${yearMonth}-${String(d).padStart(2, '0')}`;
 }
 
+function listMonthsBetween(start: string, end: string): string[] {
+  if (start > end) return [];
+  const out: string[] = [];
+  let cur = start;
+  while (cur <= end) {
+    out.push(cur);
+    cur = shiftMonth(cur, 1);
+  }
+  return out;
+}
+
 /**
- * アンカーから各月の月末残高を計算。データのある全期間（取引のある最古月〜現在月＋直近の最新月）
- * を対象にする。
+ * アンカーから各月の月末残高を計算。範囲は「取引の最古月（or アンカー月）〜現在月」
+ * を連続して埋める。取引のない月もエントリを返すので、ダッシュボードで未来月や
+ * 取引のない月を選んでも残高が表示される。
  */
 export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<MonthlyBalance[]> {
   if (!anchor.pattern || !anchor.asOfDate) return [];
   const rows = await loadAccountTransactions(anchor.pattern);
 
-  // 計算範囲: 取引の最古月〜最新月とアンカー月を内包
-  const months = new Set<string>();
+  // 計算範囲の決定。取引・アンカー月・現在月をすべて内包するように。
+  const knownMonths = new Set<string>();
   for (const t of rows) {
-    if (t.yearMonth) months.add(t.yearMonth);
+    if (t.yearMonth) knownMonths.add(t.yearMonth);
   }
   const anchorMonth = anchor.asOfDate.slice(0, 7);
-  months.add(anchorMonth);
-  if (months.size === 0) return [];
+  knownMonths.add(anchorMonth);
+  const currentMonth = dayjs().format('YYYY-MM');
+  knownMonths.add(currentMonth);
 
-  const sortedMonths = [...months].sort();
-  const earliest = sortedMonths[0];
-  const latest = sortedMonths[sortedMonths.length - 1];
+  const sortedKnown = [...knownMonths].sort();
+  const earliest = sortedKnown[0];
+  const latest = sortedKnown[sortedKnown.length - 1];
+  const months = listMonthsBetween(earliest, latest);
 
   // アンカー月末の残高を最初に求める:
   //   bal(asOf月末) = anchor.balance + Σ(asOfDate < date ≤ 月末 の取引)
   const asOfMonthEnd = lastDateOfMonth(anchorMonth);
-  const startExclusiveDate = anchor.asOfDate; // 「より後」を再現するため、startInclusive を翌日相当にする
+  const startExclusiveDate = anchor.asOfDate;
   const flowAfterAnchorThisMonth = rows.reduce((s, t) => {
     if (t.date <= startExclusiveDate) return s;
     if (t.date > asOfMonthEnd) return s;
@@ -88,7 +103,7 @@ export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<Mon
   const balanceAtAnchorMonthEnd = anchor.balance + flowAfterAnchorThisMonth;
 
   const monthlyFlow = new Map<string, number>();
-  for (const ym of sortedMonths) {
+  for (const ym of months) {
     monthlyFlow.set(ym, sumAmountInRange(rows, `${ym}-01`, lastDateOfMonth(ym)));
   }
 
@@ -114,7 +129,7 @@ export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<Mon
     cursor = next;
   }
 
-  return sortedMonths.map((ym) => ({
+  return months.map((ym) => ({
     yearMonth: ym,
     balance: balanceByMonth.get(ym) ?? 0,
     flow: monthlyFlow.get(ym) ?? 0,
