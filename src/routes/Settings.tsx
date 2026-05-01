@@ -12,12 +12,15 @@ import { clearAllData, db } from '@/lib/db';
 export default function Settings() {
   const folder = useFolderStore((s) => s.folder);
   const clearFolder = useFolderStore((s) => s.clearFolder);
+  const assetFolder = useFolderStore((s) => s.assetFolder);
+  const clearAssetFolder = useFolderStore((s) => s.clearAssetFolder);
   const email = useAuthStore((s) => s.email);
   const logout = useAuthStore((s) => s.logout);
   const hydrateSync = useSyncStore((s) => s.hydrate);
 
   const txCount = useLiveQuery(() => db.transactions.count(), [], 0);
   const fileCount = useLiveQuery(() => db.files.count(), [], 0);
+  const assetMonthCount = useLiveQuery(() => db.assetSnapshots.count(), [], 0);
 
   const [busy, setBusy] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -37,13 +40,14 @@ export default function Settings() {
     <div className="space-y-6 max-w-2xl">
       <header>
         <h1 className="text-xl font-semibold">設定</h1>
-        <p className="text-sm text-ink-60 mt-1">
-          Driveフォルダ・アカウント・キャッシュ管理。
-        </p>
+        <p className="text-sm text-ink-60 mt-1">Driveフォルダ・アカウント・キャッシュ管理。</p>
       </header>
 
       <section className="card p-6 space-y-3">
         <h2 className="text-sm font-semibold tracking-wider text-ink-70">家計簿フォルダ</h2>
+        <p className="text-xs text-ink-60">
+          マネーフォワードME の取引CSVを置いている Drive フォルダです。
+        </p>
         {folder ? (
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
@@ -70,11 +74,46 @@ export default function Settings() {
       </section>
 
       <section className="card p-6 space-y-3">
+        <h2 className="text-sm font-semibold tracking-wider text-ink-70">資産フォルダ（任意）</h2>
+        <p className="text-xs text-ink-60">
+          資産推移CSV（マネーフォワードの「資産推移」エクスポート相当）を置いている Drive
+          フォルダ。設定するとダッシュボードに「総資産」「前月比」を表示します。
+          {assetMonthCount > 0 && (
+            <span className="text-ink-40">
+              {' '}
+              現在 {assetMonthCount} ヶ月分のスナップショットが取り込まれています。
+            </span>
+          )}
+        </p>
+        {assetFolder ? (
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <div className="text-sm font-medium">{assetFolder.name}</div>
+              <div className="text-[11px] text-ink-40 break-all">{assetFolder.id}</div>
+            </div>
+            <div className="flex items-center gap-3">
+              <FolderPickerButton label="選び直す" target="asset" />
+              <button
+                type="button"
+                onClick={() => clearAssetFolder()}
+                className="text-xs text-ink-60 hover:text-ink underline-offset-2 hover:underline"
+              >
+                フォルダ設定を解除
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-ink-60">まだフォルダが選ばれていません。</p>
+            <FolderPickerButton target="asset" label="資産フォルダを選択" />
+          </div>
+        )}
+      </section>
+
+      <section className="card p-6 space-y-3">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h2 className="text-sm font-semibold tracking-wider text-ink-70">
-              ローカルキャッシュ
-            </h2>
+            <h2 className="text-sm font-semibold tracking-wider text-ink-70">ローカルキャッシュ</h2>
             <p className="text-xs text-ink-60 mt-1 tabular-nums">
               ファイル {fileCount} 件 / 取引 {txCount} 件
             </p>
@@ -108,15 +147,14 @@ export default function Settings() {
           )}
         </div>
         <p className="text-[11px] text-ink-40 leading-relaxed">
-          IndexedDB 上のキャッシュのみ削除します。Drive 上のCSV・予算設定は影響を受けません。次回同期で再取得されます。
+          IndexedDB 上のキャッシュのみ削除します。Drive
+          上のCSV・予算設定は影響を受けません。次回同期で再取得されます。
         </p>
       </section>
 
       <section className="card p-6 space-y-3">
         <div>
-          <h2 className="text-sm font-semibold tracking-wider text-ink-70">
-            メンバー
-          </h2>
+          <h2 className="text-sm font-semibold tracking-wider text-ink-70">メンバー</h2>
           <p className="text-xs text-ink-60 mt-1">
             家族のメンバーと、各メンバーが使う金融機関の対応を設定します。
             ここで紐付けた口座の取引は、取引一覧やレポートでメンバー別に集計できます。
@@ -127,12 +165,10 @@ export default function Settings() {
 
       <section className="card p-6 space-y-3">
         <div>
-          <h2 className="text-sm font-semibold tracking-wider text-ink-70">
-            カテゴリ並び順
-          </h2>
+          <h2 className="text-sm font-semibold tracking-wider text-ink-70">カテゴリ並び順</h2>
           <p className="text-xs text-ink-60 mt-1">
-            予算画面・ダッシュボードで使われるカテゴリの並び順を固定します。
-            ↑↓ で並び替えて「保存」を押すと <code>budget.json</code> に書き戻されます。
+            予算画面・ダッシュボードで使われるカテゴリの並び順を固定します。 ↑↓
+            で並び替えて「保存」を押すと <code>budget.json</code> に書き戻されます。
           </p>
         </div>
         <CategoryOrderEditor />
@@ -140,9 +176,7 @@ export default function Settings() {
 
       <section className="card p-6 space-y-4">
         <div>
-          <h2 className="text-sm font-semibold tracking-wider text-ink-70">
-            データ診断
-          </h2>
+          <h2 className="text-sm font-semibold tracking-wider text-ink-70">データ診断</h2>
           <p className="text-xs text-ink-60 mt-1">
             月別の取り込み内訳と、集計に入っていない正の取引を表示します。
             「集計収入」が0なのに「+件」がある月は要調査です。

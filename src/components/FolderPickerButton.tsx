@@ -8,12 +8,20 @@ const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
 interface Props {
   className?: string;
   label?: string;
+  /**
+   * 'budget' (既定) は家計簿フォルダ（MFの取引CSVを置く）。
+   * 'asset' は資産推移CSV用の別フォルダ。
+   */
+  target?: 'budget' | 'asset';
+  /** Picker のタイトル文字列（既定は target に応じて自動で決まる） */
+  title?: string;
 }
 
-export default function FolderPickerButton({ className, label }: Props) {
+export default function FolderPickerButton({ className, label, target = 'budget', title }: Props) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const ensureFreshToken = useAuthStore((s) => s.ensureFreshToken);
   const setFolder = useFolderStore((s) => s.setFolder);
+  const setAssetFolder = useFolderStore((s) => s.setAssetFolder);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,9 +32,12 @@ export default function FolderPickerButton({ className, label }: Props) {
       const token = (await ensureFreshToken()) ?? accessToken;
       if (!token) throw new Error('アクセストークンがありません。再ログインしてください');
       if (!API_KEY) throw new Error('VITE_GOOGLE_API_KEY が設定されていません');
-      const picked = await pickFolder({ accessToken: token, apiKey: API_KEY });
+      const pickerTitle =
+        title ?? (target === 'asset' ? '資産フォルダを選択' : '家計簿フォルダを選択');
+      const picked = await pickFolder({ accessToken: token, apiKey: API_KEY, title: pickerTitle });
       if (picked) {
-        setFolder(picked);
+        if (target === 'asset') setAssetFolder(picked);
+        else setFolder(picked);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

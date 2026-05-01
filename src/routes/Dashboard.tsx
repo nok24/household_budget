@@ -22,6 +22,7 @@ import {
 } from '@/lib/aggregate';
 import { getMonthBudget, getTotalMonthBudget, orderCategories } from '@/lib/budget';
 import { colorForCategory } from '@/lib/categories';
+import { getAssetDelta, getAssetSnapshot } from '@/lib/assets';
 import { cn, formatYen, formatPct } from '@/lib/utils';
 
 export default function Dashboard() {
@@ -148,6 +149,8 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
     [selectedMonth],
     [],
   );
+  const assetSnapshot = useLiveQuery(() => getAssetSnapshot(selectedMonth), [selectedMonth], null);
+  const assetDelta = useLiveQuery(() => getAssetDelta(selectedMonth), [selectedMonth], null);
 
   const totalBudget = getTotalMonthBudget(budgetConfig, selectedMonth);
 
@@ -173,8 +176,29 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
   const savingsRate =
     summary && summary.income > 0 ? (summary.balance / summary.income) * 100 : null;
 
+  const totalAssetDeltaPct =
+    assetSnapshot && assetDelta && assetSnapshot.total - assetDelta.total > 0
+      ? (assetDelta.total / (assetSnapshot.total - assetDelta.total)) * 100
+      : null;
+
   return (
     <div className="space-y-4">
+      {/* 資産 KPI（資産フォルダ設定時のみ） */}
+      {assetSnapshot && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <KpiCard
+            label="総資産"
+            value={assetSnapshot.total}
+            sub={
+              assetDelta
+                ? `前月比 ${assetDelta.total >= 0 ? '+' : '−'}${formatYen(Math.abs(assetDelta.total))}`
+                : `月末 ${assetSnapshot.date.replaceAll('-', '/')}`
+            }
+            delta={totalAssetDeltaPct}
+          />
+        </div>
+      )}
+
       {/* KPI 行 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
