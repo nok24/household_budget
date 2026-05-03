@@ -38,6 +38,7 @@ pnpm-debug.log*
 
 # Cloudflare
 .wrangler
+.dev.vars
 
 # household budget data — must never be committed even by accident
 *.csv

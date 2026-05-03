@@ -1,0 +1,10 @@
+# wrangler pages dev でローカル実行する際の Secrets / 環境変数。
+# 実値は .dev.vars にコピーして埋める (.dev.vars は git 管理外)。
+
+GOOGLE_CLIENT_ID=972177858790-3q7etbmd4829v4mrpvh9s4jbbf11d2pb.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=
+ALLOWED_EMAILS=nok.24.eva.05@gmail.com,mieko.kawamura.mail@gmail.com
+ADMIN_EMAILS=nok.24.eva.05@gmail.com
+# 256-bit (32 bytes) AES 鍵を base64 エンコードした値。生成例:
+#   openssl rand -base64 32
+DRIVE_TOKEN_AES_KEY=

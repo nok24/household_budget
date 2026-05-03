@@ -1,0 +1,25 @@
+name = "household-budget"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "dist"
+
+# Pages Functions の Bindings
+# - Cloudflare Pages のダッシュボードでも同じ binding を本番に設定する必要がある
+# - ローカル開発時 (`wrangler pages dev`) はこの設定が使われる
+
+[[d1_databases]]
+binding = "DB"
+database_name = "household-budget"
+database_id = "REPLACE_WITH_REAL_DB_ID" # `wrangler d1 create household-budget` で発行された UUID
+migrations_dir = "functions/db/migrations"
+
+# 環境変数 (Secrets ではない、ビルド時公開でOKな値)
+# 本番では Cloudflare Pages Settings > Environment variables で設定する
+[vars]
+ALLOWED_EMAILS = ""        # ローカル時は .dev.vars で上書き
+ADMIN_EMAILS = ""
+GOOGLE_CLIENT_ID = ""
+
+# Secrets (`wrangler pages secret put` で投入。ローカルは .dev.vars):
+# - GOOGLE_CLIENT_SECRET
+# - DRIVE_TOKEN_AES_KEY (base64 encoded 256-bit AES key)
