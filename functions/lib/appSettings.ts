@@ -8,8 +8,12 @@ import { appSettings } from '../db/schema';
 export const SETTING_KEYS = {
   /** 家計簿 (取引) CSV が置かれている Drive フォルダ ID */
   BUDGET_FOLDER_ID: 'budget_folder_id',
+  /** 表示用フォルダ名 (admin が選んだ時点でのスナップショット、Drive 側で renamed されると陳腐化) */
+  BUDGET_FOLDER_NAME: 'budget_folder_name',
   /** 資産推移 CSV が置かれている Drive フォルダ ID */
   ASSET_FOLDER_ID: 'asset_folder_id',
+  /** 表示用フォルダ名 */
+  ASSET_FOLDER_NAME: 'asset_folder_name',
   /** 直近の取引同期成功時刻 (unix ms) */
   LAST_SYNCED_TRANSACTIONS_AT: 'last_synced_transactions_at',
   /** 直近の資産同期成功時刻 (unix ms) */

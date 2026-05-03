@@ -17,6 +17,7 @@ import {
 } from '../lib/driveOAuth';
 import { SECRET_KEYS, deleteSecret, getSecret, hasSecret, putSecret } from '../lib/secrets';
 import { SETTING_KEYS, getAllSettings, putSettings } from '../lib/appSettings';
+import { DriveApiError, DriveNotConnectedError, listFolderChildren } from '../lib/driveClient';
 
 export const adminRouter = new Hono<AppBindings>();
 
@@ -138,6 +139,29 @@ adminRouter.get('/drive/status', async (c) => {
   return c.json({ connected });
 });
 
+/**
+ * 指定フォルダ直下のサブフォルダ一覧を返す。
+ * - parentId 未指定なら 'root' (My Drive のルート)
+ * - DriveFolderSelector が一階層ずつ呼び出して使う想定
+ */
+adminRouter.get('/drive/folders', async (c) => {
+  const parentId = c.req.query('parentId') || 'root';
+  const db = getDb(c.env);
+  try {
+    const folders = await listFolderChildren(db, c.env, parentId);
+    return c.json({ folders });
+  } catch (e) {
+    if (e instanceof DriveNotConnectedError) {
+      return c.json({ error: 'drive_not_connected' }, 409);
+    }
+    if (e instanceof DriveApiError) {
+      console.error('[admin/drive/folders] drive api error', e.status, e.body);
+      return c.json({ error: 'drive_api_error', status: e.status }, 502);
+    }
+    throw e;
+  }
+});
+
 // ─────────────────────────────────────────────────────────────
 // app_settings (フォルダ ID 等)
 // ─────────────────────────────────────────────────────────────
@@ -145,7 +169,9 @@ adminRouter.get('/drive/status', async (c) => {
 /** 受け付けるキーのホワイトリスト (admin が任意キーを書き込めないよう絞る) */
 const WRITABLE_SETTING_KEYS: readonly string[] = [
   SETTING_KEYS.BUDGET_FOLDER_ID,
+  SETTING_KEYS.BUDGET_FOLDER_NAME,
   SETTING_KEYS.ASSET_FOLDER_ID,
+  SETTING_KEYS.ASSET_FOLDER_NAME,
 ];
 
 adminRouter.get('/settings', async (c) => {
