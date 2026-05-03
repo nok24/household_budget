@@ -5,6 +5,7 @@ import DiagnosticsPanel from '@/components/DiagnosticsPanel';
 import CategoryOrderEditor from '@/components/CategoryOrderEditor';
 import MemberEditor from '@/components/MemberEditor';
 import AccountAnchorEditor from '@/components/AccountAnchorEditor';
+import AdminPanel from '@/components/AdminPanel';
 import { useAuthStore } from '@/store/auth';
 import { useFolderStore } from '@/store/folder';
 import { useSyncStore } from '@/store/sync';
@@ -17,6 +18,7 @@ export default function Settings() {
   const clearAssetFolder = useFolderStore((s) => s.clearAssetFolder);
   const email = useAuthStore((s) => s.email);
   const logout = useAuthStore((s) => s.logout);
+  const isAdmin = useAuthStore((s) => s.serverSession?.isAdmin ?? false);
   const hydrateSync = useSyncStore((s) => s.hydrate);
 
   const txCount = useLiveQuery(() => db.transactions.count(), [], 0);
@@ -43,6 +45,8 @@ export default function Settings() {
         <h1 className="text-xl font-semibold">設定</h1>
         <p className="text-sm text-ink-60 mt-1">Driveフォルダ・アカウント・キャッシュ管理。</p>
       </header>
+
+      {isAdmin && <AdminPanel />}
 
       <section className="card p-6 space-y-3">
         <h2 className="text-sm font-semibold tracking-wider text-ink-70">家計簿フォルダ</h2>
