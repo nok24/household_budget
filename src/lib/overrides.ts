@@ -62,6 +62,19 @@ export async function applyOverridesToRows(rows: DbTransaction[]): Promise<DbTra
   return rows.map((r) => mergeOverride(r, map.get(r.id)));
 }
 
+/**
+ * 既に取得済みの override Map を transactions に適用する pure 関数。
+ * TanStack Query 経由で取得したサーバ取引と Dexie の overrides を
+ * フロントで合成するために使う。
+ */
+export function applyOverrideMap(
+  rows: DbTransaction[],
+  map: Map<string, DbOverride>,
+): DbTransaction[] {
+  if (map.size === 0) return rows;
+  return rows.map((r) => mergeOverride(r, map.get(r.id)));
+}
+
 export async function hasOverride(id: string): Promise<boolean> {
   const ov = await db.overrides.get(id);
   return !!ov;

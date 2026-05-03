@@ -1,27 +1,22 @@
-import { useEffect } from 'react';
+import { useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import dayjs from 'dayjs';
-import FolderPickerButton from '@/components/FolderPickerButton';
+import { Link } from 'react-router-dom';
 import MonthSwitcher from '@/components/MonthSwitcher';
 import PaceBadge from '@/components/PaceBadge';
 import ProgressBar from '@/components/ProgressBar';
 import TrendBarChart from '@/components/charts/TrendBarChart';
 import CategoryDonut from '@/components/charts/CategoryDonut';
-import { useAuthStore } from '@/store/auth';
 import { useBudgetStore } from '@/store/budget';
-import { useFolderStore } from '@/store/folder';
-import { useSyncStore } from '@/store/sync';
 import { useUiStore } from '@/store/ui';
-import { db } from '@/lib/db';
-import { syncDriveFolder } from '@/lib/sync';
 import {
-  getCategoryBreakdown,
-  getCategoryBreakdownYTD,
-  getMonthSummary,
-  getMonthlyTrend,
-  getRecentTransactionsForMonth,
-  getYearToDateSummary,
+  breakdownCategories,
+  breakdownCategoriesYTD,
+  pickRecentTransactionsForMonth,
   shiftMonth,
+  summarizeMonth,
+  summarizeMonthlyTrend,
+  summarizeYearToDate,
 } from '@/lib/aggregate';
 import {
   getAnnualBudget,
@@ -32,76 +27,24 @@ import {
 } from '@/lib/budget';
 import { colorForCategory } from '@/lib/categories';
 import { getAssetDelta, getAssetSnapshotOrLatestBefore } from '@/lib/assets';
-import { computeMonthlyBalances, type MonthlyBalance } from '@/lib/accountBalance';
+import { computeMonthlyBalancesFromArray, type MonthlyBalance } from '@/lib/accountBalance';
 import { cn, formatYen, formatPct } from '@/lib/utils';
+import { useAppliedTransactions, useSyncStatus, useSyncTransactionsMutation } from '@/lib/queries';
 
 export default function Dashboard() {
-  const folder = useFolderStore((s) => s.folder);
   const selectedMonth = useUiStore((s) => s.selectedMonth);
-  useAutoSyncOnFirstFolder();
-
   return (
     <div className="space-y-5">
-      <DashboardHeader folderId={folder?.id ?? null} selectedMonth={selectedMonth} />
-
-      {!folder ? <FolderEmpty /> : <DashboardBody selectedMonth={selectedMonth} />}
+      <DashboardHeader selectedMonth={selectedMonth} />
+      <DashboardBody selectedMonth={selectedMonth} />
     </div>
   );
 }
 
-function useAutoSyncOnFirstFolder() {
-  const folder = useFolderStore((s) => s.folder);
-  const accessToken = useAuthStore((s) => s.accessToken);
-  const ensureFreshToken = useAuthStore((s) => s.ensureFreshToken);
-  const { beginSync, finishSync, failSync } = useSyncStore();
-
-  useEffect(() => {
-    if (!folder || !accessToken) return;
-    let cancelled = false;
-    void (async () => {
-      const fileCount = await db.files.count();
-      if (cancelled || fileCount > 0) return;
-      beginSync();
-      try {
-        const token = (await ensureFreshToken()) ?? accessToken;
-        if (!token) throw new Error('not authenticated');
-        const result = await syncDriveFolder(token, folder.id);
-        if (!cancelled) finishSync(result);
-      } catch (e) {
-        if (!cancelled) failSync(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [folder?.id, accessToken]);
-}
-
-function DashboardHeader({
-  folderId,
-  selectedMonth,
-}: {
-  folderId: string | null;
-  selectedMonth: string;
-}) {
-  const accessToken = useAuthStore((s) => s.accessToken);
-  const ensureFreshToken = useAuthStore((s) => s.ensureFreshToken);
-  const { status, beginSync, finishSync, failSync } = useSyncStore();
-  const folderName = useFolderStore((s) => s.folder?.name ?? null);
-
-  async function runSync() {
-    if (!folderId) return;
-    beginSync();
-    try {
-      const token = (await ensureFreshToken()) ?? accessToken;
-      if (!token) throw new Error('not authenticated');
-      const result = await syncDriveFolder(token, folderId);
-      finishSync(result);
-    } catch (e) {
-      failSync(e instanceof Error ? e.message : String(e));
-    }
-  }
+function DashboardHeader({ selectedMonth }: { selectedMonth: string }) {
+  const syncStatus = useSyncStatus();
+  const syncMutation = useSyncTransactionsMutation();
+  const hasData = (syncStatus.data?.transactionCount ?? 0) > 0;
 
   return (
     <header className="flex items-end justify-between gap-4 flex-wrap">
@@ -110,19 +53,23 @@ function DashboardHeader({
         <h1 className="text-[22px] font-medium leading-tight tracking-[-0.01em]">
           {dayjs(`${selectedMonth}-01`).format('YYYY年 M月')}
         </h1>
-        {folderName && <div className="text-[11px] text-ink-40 mt-1.5">{folderName}</div>}
+        {syncStatus.data?.lastSyncedAt && (
+          <div className="text-[11px] text-ink-40 mt-1.5">
+            最終同期: {new Date(syncStatus.data.lastSyncedAt).toLocaleString('ja-JP')}
+          </div>
+        )}
       </div>
-      {folderId && (
+      {hasData && (
         <div className="flex items-center gap-2">
           <MonthSwitcher />
           <div className="w-px h-5 bg-line mx-1" />
           <button
             type="button"
-            onClick={() => void runSync()}
-            disabled={status === 'syncing'}
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
             className="px-3.5 py-[7px] text-xs font-medium bg-accent text-white rounded-md hover:opacity-90 disabled:opacity-50 transition-opacity"
           >
-            {status === 'syncing' ? '同期中…' : '同期'}
+            {syncMutation.isPending ? '同期中…' : '同期'}
           </button>
         </div>
       )}
@@ -130,81 +77,74 @@ function DashboardHeader({
   );
 }
 
-function FolderEmpty() {
-  return (
-    <div className="card p-10 text-center space-y-3">
-      <h2 className="text-base font-medium">家計簿フォルダを選択</h2>
-      <p className="text-sm text-ink-60 max-w-md mx-auto">
-        マネーフォワードの月次CSVが入っているDriveフォルダを選んでください。一度選べば、それ以降は同じフォルダから自動で取り込みます。
-      </p>
-      <FolderPickerButton className="flex justify-center pt-2" />
-    </div>
-  );
-}
-
 function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
-  const totalCount = useLiveQuery(() => db.transactions.count(), [], 0);
+  const { data: applied, isLoading } = useAppliedTransactions();
+  const syncStatus = useSyncStatus();
   const budgetConfig = useBudgetStore((s) => s.config);
+  const totalCount = applied.length;
 
-  const summary = useLiveQuery(() => getMonthSummary(selectedMonth), [selectedMonth], null);
-  const prevSummary = useLiveQuery(
-    () => getMonthSummary(shiftMonth(selectedMonth, -1)),
-    [selectedMonth],
-    null,
+  const summary = useMemo(() => summarizeMonth(applied, selectedMonth), [applied, selectedMonth]);
+  const prevSummary = useMemo(
+    () => summarizeMonth(applied, shiftMonth(selectedMonth, -1)),
+    [applied, selectedMonth],
   );
-  const ytdSummary = useLiveQuery(() => getYearToDateSummary(selectedMonth), [selectedMonth], null);
-  const trend = useLiveQuery(() => getMonthlyTrend(selectedMonth, 12), [selectedMonth], []);
-  const categories = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
-  const recent = useLiveQuery(
-    () => getRecentTransactionsForMonth(selectedMonth, 7),
-    [selectedMonth],
-    [],
+  const ytdSummary = useMemo(
+    () => summarizeYearToDate(applied, selectedMonth),
+    [applied, selectedMonth],
   );
-  // 該当月にデータが無ければそれ以前の直近月にフォールバック（資産CSVは月末更新が遅れるケース対応）
+  const trend = useMemo(
+    () => summarizeMonthlyTrend(applied, selectedMonth, 12),
+    [applied, selectedMonth],
+  );
+  const categories = useMemo(
+    () => breakdownCategories(applied, selectedMonth),
+    [applied, selectedMonth],
+  );
+  const recent = useMemo(
+    () => pickRecentTransactionsForMonth(applied, selectedMonth, 7),
+    [applied, selectedMonth],
+  );
+  // 該当月にデータが無ければそれ以前の直近月にフォールバック
   const assetSnapshot = useLiveQuery(
     () => getAssetSnapshotOrLatestBefore(selectedMonth),
     [selectedMonth],
     null,
   );
-  // 前月比は当月と前月の両方が「正確に存在する」ときだけ意味を持つ
   const assetDelta = useLiveQuery(() => getAssetDelta(selectedMonth), [selectedMonth], null);
   const assetSnapshotIsExact = assetSnapshot ? assetSnapshot.yearMonth === selectedMonth : false;
   const accountAnchors = useBudgetStore((s) => s.config?.accountAnchors);
-  const accountBalances = useLiveQuery(
-    async () => {
-      if (!accountAnchors || accountAnchors.length === 0) return [];
-      const series = await Promise.all(
-        accountAnchors.map(async (a) => {
-          const all = await computeMonthlyBalances(a);
-          // 該当月が series に無ければ「それ以前で最新の月」を採用。
-          // pattern にマッチする取引が無いケースや、選択月が anchor 月より過去の
-          // ケースで series が短くなっても、KPI は表示できるようにする。
-          const findOrBefore = (ym: string): MonthlyBalance | undefined => {
-            const exact = all.find((s) => s.yearMonth === ym);
-            if (exact) return exact;
-            const candidates = all.filter((s) => s.yearMonth <= ym);
-            return candidates[candidates.length - 1];
-          };
-          const cur = findOrBefore(selectedMonth);
-          const prev = findOrBefore(shiftMonth(selectedMonth, -1));
-          const isExact = cur ? cur.yearMonth === selectedMonth : false;
-          return { anchor: a, current: cur, prev, isExact };
-        }),
-      );
-      return series;
-    },
-    [accountAnchors, selectedMonth],
-    [],
-  );
+  const accountBalances = useMemo(() => {
+    if (!accountAnchors || accountAnchors.length === 0) return [];
+    return accountAnchors.map((a) => {
+      const all = computeMonthlyBalancesFromArray(applied, a);
+      const findOrBefore = (ym: string): MonthlyBalance | undefined => {
+        const exact = all.find((s) => s.yearMonth === ym);
+        if (exact) return exact;
+        const candidates = all.filter((s) => s.yearMonth <= ym);
+        return candidates[candidates.length - 1];
+      };
+      const cur = findOrBefore(selectedMonth);
+      const prev = findOrBefore(shiftMonth(selectedMonth, -1));
+      const isExact = cur ? cur.yearMonth === selectedMonth : false;
+      return { anchor: a, current: cur, prev, isExact };
+    });
+  }, [accountAnchors, applied, selectedMonth]);
 
   const yearlyBudget = getAnnualTotalBudget(budgetConfig);
+
+  if (isLoading || syncStatus.isLoading) {
+    return <div className="card p-10 text-center text-sm text-ink-60">読み込み中…</div>;
+  }
 
   if (totalCount === 0) {
     return (
       <div className="card p-10 text-center space-y-3">
         <h2 className="text-base font-medium">まだデータがありません</h2>
         <p className="text-sm text-ink-60">
-          右上の「同期」ボタンで Drive のCSVを取り込んでください。
+          <Link to="/settings" className="text-accent hover:underline">
+            設定ページ
+          </Link>{' '}
+          で Drive を接続して取引 CSV を取り込んでください。
         </p>
       </div>
     );
@@ -232,7 +172,7 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
 
   return (
     <div className="space-y-4">
-      {/* 資産 KPI（資産フォルダ + 口座アンカー設定時のみ） */}
+      {/* 資産 KPI */}
       {(assetSnapshot || accountBalances.some((b) => b.current)) && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {assetSnapshot && (
@@ -249,7 +189,6 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
           )}
           {accountBalances.map((b) => {
             if (!b.current) return null;
-            // 当月・前月とも正確な月のデータがあるときだけ「前月比」を出す
             const exactPrev =
               b.prev !== undefined && b.prev.yearMonth === shiftMonth(selectedMonth, -1);
             const delta = b.isExact && exactPrev ? b.current.balance - b.prev!.balance : null;
@@ -327,7 +266,7 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
         />
       </div>
 
-      {/* 中段: トレンド + ドーナツ */}
+      {/* 中段 */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-4">
         <section className="card p-5">
           <CardHead label="収支推移 · 直近12ヶ月">
@@ -369,9 +308,9 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
         </section>
       </div>
 
-      {/* 下段: 予算消化 + 最近の取引 */}
+      {/* 下段 */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-4">
-        <BudgetUsageCard selectedMonth={selectedMonth} />
+        <BudgetUsageCard applied={applied} selectedMonth={selectedMonth} />
         <RecentTransactionsCard rows={recent} />
       </div>
     </div>
@@ -389,7 +328,6 @@ interface KpiCardProps {
   numeric?: boolean;
   customDisplay?: string;
   progress?: { current: number; max: number };
-  /** 進捗バー下に表示するペースバッジ。年間予算消化のときだけ渡す。 */
   pace?: { label: string; tone: 'over' | 'fast' | 'normal' | 'slow'; expected: number };
 }
 
@@ -493,16 +431,20 @@ function Legend({ items }: { items: { color: string; label: string }[] }) {
   );
 }
 
-function BudgetUsageCard({ selectedMonth }: { selectedMonth: string }) {
+function BudgetUsageCard({
+  applied,
+  selectedMonth,
+}: {
+  applied: import('@/lib/db').DbTransaction[];
+  selectedMonth: string;
+}) {
   const config = useBudgetStore((s) => s.config);
-  const ytdBreakdown = useLiveQuery(
-    () => getCategoryBreakdownYTD(selectedMonth),
-    [selectedMonth],
-    [],
+  const ytdBreakdown = useMemo(
+    () => breakdownCategoriesYTD(applied, selectedMonth),
+    [applied, selectedMonth],
   );
   const expectedPct = getExpectedPaceAtMonth(selectedMonth);
 
-  // 予算が設定されているカテゴリ + 使用額があるカテゴリを order に従って表示
   const rows = (() => {
     if (!config) return [];
     const expByCat = new Map(ytdBreakdown.map((b) => [b.name, b.amount]));
