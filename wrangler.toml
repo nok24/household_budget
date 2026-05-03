@@ -19,6 +19,12 @@ migrations_dir = "functions/db/migrations"
 ALLOWED_EMAILS = ""        # ローカル時は .dev.vars で上書き
 ADMIN_EMAILS = ""
 GOOGLE_CLIENT_ID = ""
+# CSRF 検証で許可する追加オリジン (カンマ区切り)。空ならリクエストの Host から自動算出。
+# 開発時に複数ポートを跨ぐ場合などに使用 (例: Vite=5173 と pages dev=8788 を同時起動)。
+ALLOWED_ORIGINS = ""
+# dev (HTTP) で cookie を Secure 無し / `__Host-` 無しで発行するためのフラグ。
+# 本番では未設定または "false" にする。`.dev.vars` で IS_DEV=true を設定する運用。
+IS_DEV = ""
 
 # Secrets (`wrangler pages secret put` で投入。ローカルは .dev.vars):
 # - GOOGLE_CLIENT_SECRET

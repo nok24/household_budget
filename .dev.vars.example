@@ -8,3 +8,12 @@ ADMIN_EMAILS=nok.24.eva.05@gmail.com
 # 256-bit (32 bytes) AES 鍵を base64 エンコードした値。生成例:
 #   openssl rand -base64 32
 DRIVE_TOKEN_AES_KEY=
+
+# dev モード (HTTP で cookie を発行できるよう Secure / __Host- prefix を無効化)
+# 本番では未設定または "false" にする。
+IS_DEV=true
+
+# CSRF Origin 検証の追加許可オリジン (任意、カンマ区切り)。
+# 例: Vite を 5173、pages dev を 8788 で別ポート起動して 5173 からも fetch する場合。
+# 通常 (vite proxy で /api を pages dev に流す構成) は未設定で OK。
+# ALLOWED_ORIGINS=http://localhost:5173

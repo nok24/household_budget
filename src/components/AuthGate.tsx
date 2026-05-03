@@ -35,6 +35,11 @@ export default function AuthGate({ children }: AuthGateProps) {
     return <>{children}</>;
   }
 
+  // 初期化中は何も描画しない (cookie 復帰中にログイン UI が一瞬出るのを防ぐ)
+  if (status === 'initializing') {
+    return <div className="min-h-screen bg-canvas" aria-hidden />;
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-canvas">
       <div className="card max-w-md w-full p-8 space-y-5">

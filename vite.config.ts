@@ -12,6 +12,14 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: false,
+    proxy: {
+      // ローカル開発時 `/api` を wrangler pages dev (8788) に転送する。
+      // 本番では同一オリジンでサーブされるので proxy 不要。
+      '/api': {
+        target: 'http://localhost:8788',
+        changeOrigin: false,
+      },
+    },
   },
   build: {
     target: 'es2022',
