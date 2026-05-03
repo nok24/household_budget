@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { AppBindings } from '../types';
 import { requireAuth } from '../lib/authMiddleware';
 import { getDb, type Database } from '../lib/db';
-import { csvFiles, syncLog, transactions, overrides } from '../db/schema';
+import { assetSnapshots, csvFiles, syncLog, transactions, overrides } from '../db/schema';
 import { SETTING_KEYS, getSetting, putSetting } from '../lib/appSettings';
 import {
   DriveApiError,
@@ -13,6 +13,7 @@ import {
   type DriveCsvFile,
 } from '../lib/driveClient';
 import { decodeAndParseTransactionsCsv } from '../lib/csv/mfTransactions';
+import { decodeAndParseAssetCsv, type MonthlyAssetSnapshot } from '../lib/csv/mfAssets';
 
 export const syncRouter = new Hono<AppBindings>();
 
@@ -257,36 +258,185 @@ async function deleteFileTransactions(db: Database, sourceFileId: string): Promi
 }
 
 // ─────────────────────────────────────────────────────────────
+// 資産同期
+// ─────────────────────────────────────────────────────────────
+
+interface AssetsSyncResult {
+  total: number;
+  fetched: number;
+  skipped: number;
+  monthlySnapshots: number;
+  errors: Array<{ name: string; message: string }>;
+}
+
+/**
+ * 資産推移 CSV を取り込んで asset_snapshots に全置換で書く。
+ * - MF の資産推移 CSV は累積形式 (全期間入っている) なので、
+ *   読み込んだ最新のスナップショットセットで丸ごと置き換える
+ * - 同じ月の行が複数ファイルに重複していれば「最終日付が新しい行」を採用
+ * - ヘッダ不一致の CSV は skip (取引 CSV の混入を安全にスキップ)
+ */
+syncRouter.post('/assets', async (c) => {
+  const db = getDb(c.env);
+
+  const recentRunning = await db
+    .select()
+    .from(syncLog)
+    .where(and(eq(syncLog.kind, 'assets'), eq(syncLog.status, 'running')))
+    .orderBy(desc(syncLog.startedAt))
+    .limit(1);
+  const stale = recentRunning[0] && Date.now() - recentRunning[0].startedAt > SYNC_LOCK_STALE_MS;
+  if (recentRunning[0] && !stale) {
+    return c.json({ error: 'sync_in_progress', startedAt: recentRunning[0].startedAt }, 409);
+  }
+
+  const folderId = await getSetting(db, SETTING_KEYS.ASSET_FOLDER_ID);
+  if (!folderId) {
+    return c.json({ error: 'asset_folder_not_set' }, 400);
+  }
+
+  const startedAt = Date.now();
+  const inserted = await db
+    .insert(syncLog)
+    .values({ kind: 'assets', status: 'running', startedAt })
+    .returning({ id: syncLog.id });
+  const logId = inserted[0]!.id;
+
+  try {
+    const result = await syncAssets(db, c.env, folderId);
+    await putSetting(db, SETTING_KEYS.LAST_SYNCED_ASSETS_AT, String(Date.now()));
+    await db
+      .update(syncLog)
+      .set({
+        status: 'success',
+        finishedAt: Date.now(),
+        fetched: result.fetched,
+        errorsJson: result.errors.length > 0 ? JSON.stringify(result.errors) : null,
+      })
+      .where(eq(syncLog.id, logId));
+    return c.json({ ok: true, ...result });
+  } catch (e) {
+    await db
+      .update(syncLog)
+      .set({
+        status: 'error',
+        finishedAt: Date.now(),
+        errorsJson: JSON.stringify([
+          { name: '__sync__', message: e instanceof Error ? e.message : String(e) },
+        ]),
+      })
+      .where(eq(syncLog.id, logId));
+
+    if (e instanceof DriveNotConnectedError) {
+      return c.json({ error: 'drive_not_connected' }, 409);
+    }
+    if (e instanceof DriveApiError) {
+      console.error('[sync/assets] drive api error', e.status, e.body);
+      return c.json({ error: 'drive_api_error', status: e.status }, 502);
+    }
+    throw e;
+  }
+});
+
+async function syncAssets(
+  db: Database,
+  env: AppBindings['Bindings'],
+  folderId: string,
+): Promise<AssetsSyncResult> {
+  const remote = await listCsvFilesInFolder(db, env, folderId);
+  const errors: AssetsSyncResult['errors'] = [];
+  let fetched = 0;
+  let skipped = 0;
+
+  // 月→snapshot+sourceFileId のマップ。複数ファイルで月が重複したら最終日付勝ち。
+  const monthly = new Map<string, MonthlyAssetSnapshot & { sourceFileId: string }>();
+
+  for (const file of remote) {
+    try {
+      const buf = await downloadFileBytes(db, env, file.id);
+      let snapshots: MonthlyAssetSnapshot[];
+      try {
+        snapshots = decodeAndParseAssetCsv(buf);
+      } catch (e) {
+        // ヘッダ不一致は skip (取引 CSV など)
+        if (e instanceof Error && e.message === 'asset csv header mismatch') {
+          skipped++;
+          continue;
+        }
+        throw e;
+      }
+      for (const s of snapshots) {
+        const cur = monthly.get(s.yearMonth);
+        if (!cur || s.date > cur.date) {
+          monthly.set(s.yearMonth, { ...s, sourceFileId: file.id });
+        }
+      }
+      fetched++;
+    } catch (e) {
+      errors.push({
+        name: file.name,
+        message: formatErrorChain(e, file.name),
+      });
+    }
+  }
+
+  // 全置換: 既存 asset_snapshots を削除して新セットを書き込む
+  await db.delete(assetSnapshots);
+  if (monthly.size > 0) {
+    const records = [...monthly.values()];
+    // bound parameter 制限 (100): 1 行 9 列 → 11 行 / chunk
+    const CHUNK = 11;
+    for (let i = 0; i < records.length; i += CHUNK) {
+      await db.insert(assetSnapshots).values(records.slice(i, i + CHUNK));
+    }
+  }
+
+  return {
+    total: remote.length,
+    fetched,
+    skipped,
+    monthlySnapshots: monthly.size,
+    errors,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
 // 同期状態の照会
 // ─────────────────────────────────────────────────────────────
 
 syncRouter.get('/status', async (c) => {
   const db = getDb(c.env);
-  // 直近の transactions 同期
-  const lastTx = await db
-    .select()
-    .from(syncLog)
-    .where(eq(syncLog.kind, 'transactions'))
-    .orderBy(desc(syncLog.startedAt))
-    .limit(1);
-  // 取引総数 + ファイル数を併せて返す (UI 表示用)
-  const counts = await db
-    .select({
-      txCount: sql<number>`count(*)`,
-    })
-    .from(transactions);
-  const fileCounts = await db
-    .select({
-      fileCount: sql<number>`count(*)`,
-    })
-    .from(csvFiles)
-    .where(eq(csvFiles.kind, 'transactions'));
-  const lastSyncedAt = await getSetting(db, SETTING_KEYS.LAST_SYNCED_TRANSACTIONS_AT);
+  const [lastTx, lastAsset, txCounts, fileCounts, snapshotCounts, lastTxAt, lastAssetAt] =
+    await Promise.all([
+      db
+        .select()
+        .from(syncLog)
+        .where(eq(syncLog.kind, 'transactions'))
+        .orderBy(desc(syncLog.startedAt))
+        .limit(1),
+      db
+        .select()
+        .from(syncLog)
+        .where(eq(syncLog.kind, 'assets'))
+        .orderBy(desc(syncLog.startedAt))
+        .limit(1),
+      db.select({ c: sql<number>`count(*)` }).from(transactions),
+      db
+        .select({ c: sql<number>`count(*)` })
+        .from(csvFiles)
+        .where(eq(csvFiles.kind, 'transactions')),
+      db.select({ c: sql<number>`count(*)` }).from(assetSnapshots),
+      getSetting(db, SETTING_KEYS.LAST_SYNCED_TRANSACTIONS_AT),
+      getSetting(db, SETTING_KEYS.LAST_SYNCED_ASSETS_AT),
+    ]);
 
   return c.json({
     lastLog: lastTx[0] ?? null,
-    lastSyncedAt: lastSyncedAt ? Number(lastSyncedAt) : null,
-    transactionCount: counts[0]?.txCount ?? 0,
-    fileCount: fileCounts[0]?.fileCount ?? 0,
+    lastAssetLog: lastAsset[0] ?? null,
+    lastSyncedAt: lastTxAt ? Number(lastTxAt) : null,
+    lastAssetSyncedAt: lastAssetAt ? Number(lastAssetAt) : null,
+    transactionCount: txCounts[0]?.c ?? 0,
+    fileCount: fileCounts[0]?.c ?? 0,
+    assetSnapshotCount: snapshotCounts[0]?.c ?? 0,
   });
 });

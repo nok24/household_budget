@@ -86,19 +86,24 @@ export function useAppliedTransactions(): {
   };
 }
 
+interface SyncLog {
+  id: number;
+  kind: string;
+  status: 'running' | 'success' | 'error';
+  startedAt: number;
+  finishedAt: number | null;
+  fetched: number | null;
+  errorsJson: string | null;
+}
+
 interface SyncStatusResponse {
-  lastLog: {
-    id: number;
-    kind: string;
-    status: 'running' | 'success' | 'error';
-    startedAt: number;
-    finishedAt: number | null;
-    fetched: number | null;
-    errorsJson: string | null;
-  } | null;
+  lastLog: SyncLog | null;
+  lastAssetLog: SyncLog | null;
   lastSyncedAt: number | null;
+  lastAssetSyncedAt: number | null;
   transactionCount: number;
   fileCount: number;
+  assetSnapshotCount: number;
 }
 
 export function useSyncStatus() {
@@ -135,6 +140,60 @@ export function useSyncTransactionsMutation() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      void queryClient.invalidateQueries({ queryKey: ['sync', 'status'] });
+    },
+  });
+}
+
+export interface ApiAssetSnapshot {
+  yearMonth: string;
+  date: string;
+  total: number;
+  savings: number;
+  stocks: number;
+  funds: number;
+  pension: number;
+  points: number;
+}
+
+interface AssetSnapshotsResponse {
+  snapshots: ApiAssetSnapshot[];
+}
+
+export function useAssetSnapshots() {
+  return useQuery({
+    queryKey: ['assets', 'snapshots'],
+    queryFn: async () => {
+      const res = await apiGet<AssetSnapshotsResponse>('/api/assets/snapshots');
+      if (!res.ok) throw new Error(`failed to fetch asset snapshots: ${res.error.status}`);
+      return res.data.snapshots;
+    },
+    staleTime: 60 * 1000,
+  });
+}
+
+interface SyncAssetsResponse {
+  ok: true;
+  total: number;
+  fetched: number;
+  skipped: number;
+  monthlySnapshots: number;
+  errors: Array<{ name: string; message: string }>;
+}
+
+export function useSyncAssetsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await apiPost<SyncAssetsResponse>('/api/sync/assets');
+      if (!res.ok) {
+        const body = res.error.body as { error?: string } | null;
+        throw new Error(body?.error || `sync failed (${res.error.status})`);
+      }
+      return res.data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['assets'] });
       void queryClient.invalidateQueries({ queryKey: ['sync', 'status'] });
     },
   });

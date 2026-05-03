@@ -6,6 +6,7 @@ import { adminRouter } from '../routes/admin';
 import { syncRouter } from '../routes/sync';
 import { transactionsRouter } from '../routes/transactions';
 import { budgetRouter } from '../routes/budget';
+import { assetsRouter } from '../routes/assets';
 
 // Pages Functions のキャッチオール。`/api/*` の全リクエストを Hono にディスパッチする。
 // 各サブルータは ./routes/ 配下に分割していき、ここに mount する。
@@ -37,6 +38,9 @@ app.route('/api/transactions', transactionsRouter);
 
 // 予算設定 (Phase 3 PR-D): members / categoryOrder / annual / anchors / settings
 app.route('/api/budget', budgetRouter);
+
+// 資産スナップショット (Phase 3 PR-E)
+app.route('/api/assets', assetsRouter);
 
 // 未マッチは 404
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
