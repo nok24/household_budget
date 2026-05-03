@@ -15,19 +15,24 @@ interface SettingsResponse {
   settings: Record<string, string>;
 }
 
+interface SyncLog {
+  id: number;
+  kind: string;
+  status: 'running' | 'success' | 'error';
+  startedAt: number;
+  finishedAt: number | null;
+  fetched: number | null;
+  errorsJson: string | null;
+}
+
 interface SyncStatusResponse {
-  lastLog: {
-    id: number;
-    kind: string;
-    status: 'running' | 'success' | 'error';
-    startedAt: number;
-    finishedAt: number | null;
-    fetched: number | null;
-    errorsJson: string | null;
-  } | null;
+  lastLog: SyncLog | null;
+  lastAssetLog: SyncLog | null;
   lastSyncedAt: number | null;
+  lastAssetSyncedAt: number | null;
   transactionCount: number;
   fileCount: number;
+  assetSnapshotCount: number;
 }
 
 interface SyncTransactionsResponse {
@@ -36,6 +41,15 @@ interface SyncTransactionsResponse {
   fetched: number;
   skipped: number;
   removed: number;
+  errors: Array<{ name: string; message: string }>;
+}
+
+interface SyncAssetsResponse {
+  ok: true;
+  total: number;
+  fetched: number;
+  skipped: number;
+  monthlySnapshots: number;
   errors: Array<{ name: string; message: string }>;
 }
 
@@ -91,6 +105,7 @@ export default function AdminPanel() {
   const [savingFolder, setSavingFolder] = useState<FolderKind | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [syncAssetsBusy, setSyncAssetsBusy] = useState(false);
   const [migrateBusy, setMigrateBusy] = useState(false);
   const [migrateDryRun, setMigrateDryRun] = useState<MigrateBudgetDryRunResponse | null>(null);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
@@ -223,6 +238,33 @@ export default function AdminPanel() {
       setMessage({ kind: 'error', text: msg });
     }
     setSyncBusy(false);
+  };
+
+  const onSyncAssets = async () => {
+    setSyncAssetsBusy(true);
+    setMessage(null);
+    const res = await apiPost<SyncAssetsResponse>('/api/sync/assets');
+    if (res.ok) {
+      const r = res.data;
+      const errSummary = r.errors.length > 0 ? ` (${r.errors.length} 件のエラー)` : '';
+      setMessage({
+        kind: r.errors.length > 0 ? 'error' : 'success',
+        text: `資産同期完了: ${r.fetched} ファイル取込 / ${r.skipped} skip / ${r.monthlySnapshots} ヶ月分${errSummary}`,
+      });
+      await reloadSyncStatus();
+    } else {
+      const body = res.error.body as { error?: string } | null;
+      const msg =
+        body?.error === 'asset_folder_not_set'
+          ? '資産フォルダが未設定です'
+          : body?.error === 'sync_in_progress'
+            ? '別の同期が実行中です'
+            : body?.error === 'drive_not_connected'
+              ? 'Drive 未接続です'
+              : '資産同期に失敗しました';
+      setMessage({ kind: 'error', text: msg });
+    }
+    setSyncAssetsBusy(false);
   };
 
   const onMigrateBudget = async (mode: 'dry-run' | 'run' | 'force') => {
@@ -455,6 +497,44 @@ export default function AdminPanel() {
                 className="text-xs font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-50"
               >
                 {syncBusy ? '同期中…' : !budgetFolderId ? 'フォルダ未設定' : 'Drive から取り込み'}
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2 pt-3 border-t border-line">
+            <div className="text-xs font-medium tracking-wider text-ink-70">
+              資産データ同期 (サーバ側)
+            </div>
+            <div className="text-[11px] text-ink-40 leading-relaxed">
+              資産フォルダ内の資産推移 CSV を取り込んで月末スナップショットとして D1
+              に全置換で保存します。Dashboard の総資産 KPI に使われます。
+            </div>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-[11px] text-ink-60 tabular-nums leading-relaxed">
+                {syncStatus ? (
+                  <>
+                    最終同期:{' '}
+                    {syncStatus.lastAssetSyncedAt
+                      ? new Date(syncStatus.lastAssetSyncedAt).toLocaleString('ja-JP')
+                      : '未同期'}
+                    <br />
+                    スナップショット: {syncStatus.assetSnapshotCount} ヶ月分
+                  </>
+                ) : (
+                  '読み込み中…'
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => void onSyncAssets()}
+                disabled={syncAssetsBusy || !assetFolderId}
+                className="text-xs font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {syncAssetsBusy
+                  ? '同期中…'
+                  : !assetFolderId
+                    ? 'フォルダ未設定'
+                    : 'Drive から取り込み'}
               </button>
             </div>
           </div>

@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import dayjs from 'dayjs';
 import { Link } from 'react-router-dom';
 import MonthSwitcher from '@/components/MonthSwitcher';
@@ -26,10 +25,37 @@ import {
   orderCategories,
 } from '@/lib/budget';
 import { colorForCategory } from '@/lib/categories';
-import { getAssetDelta, getAssetSnapshotOrLatestBefore } from '@/lib/assets';
 import { computeMonthlyBalancesFromArray, type MonthlyBalance } from '@/lib/accountBalance';
 import { cn, formatYen, formatPct } from '@/lib/utils';
-import { useAppliedTransactions, useSyncStatus, useSyncTransactionsMutation } from '@/lib/queries';
+import {
+  useAppliedTransactions,
+  useAssetSnapshots,
+  useSyncStatus,
+  useSyncTransactionsMutation,
+  type ApiAssetSnapshot,
+} from '@/lib/queries';
+
+function findSnapshotOrLatestBefore(
+  snapshots: ApiAssetSnapshot[],
+  yearMonth: string,
+): ApiAssetSnapshot | null {
+  const exact = snapshots.find((s) => s.yearMonth === yearMonth);
+  if (exact) return exact;
+  const before = snapshots
+    .filter((s) => s.yearMonth <= yearMonth)
+    .sort((a, b) => (a.yearMonth < b.yearMonth ? 1 : -1));
+  return before[0] ?? null;
+}
+
+function computeAssetDelta(
+  snapshots: ApiAssetSnapshot[],
+  yearMonth: string,
+): { total: number } | null {
+  const cur = snapshots.find((s) => s.yearMonth === yearMonth);
+  const prev = snapshots.find((s) => s.yearMonth === shiftMonth(yearMonth, -1));
+  if (!cur || !prev) return null;
+  return { total: cur.total - prev.total };
+}
 
 export default function Dashboard() {
   const selectedMonth = useUiStore((s) => s.selectedMonth);
@@ -105,12 +131,15 @@ function DashboardBody({ selectedMonth }: { selectedMonth: string }) {
     [applied, selectedMonth],
   );
   // 該当月にデータが無ければそれ以前の直近月にフォールバック
-  const assetSnapshot = useLiveQuery(
-    () => getAssetSnapshotOrLatestBefore(selectedMonth),
-    [selectedMonth],
-    null,
+  const { data: assetSnapshots = [] } = useAssetSnapshots();
+  const assetSnapshot = useMemo(
+    () => findSnapshotOrLatestBefore(assetSnapshots, selectedMonth),
+    [assetSnapshots, selectedMonth],
   );
-  const assetDelta = useLiveQuery(() => getAssetDelta(selectedMonth), [selectedMonth], null);
+  const assetDelta = useMemo(
+    () => computeAssetDelta(assetSnapshots, selectedMonth),
+    [assetSnapshots, selectedMonth],
+  );
   const assetSnapshotIsExact = assetSnapshot ? assetSnapshot.yearMonth === selectedMonth : false;
   const accountAnchors = useBudgetStore((s) => s.config?.accountAnchors);
   const accountBalances = useMemo(() => {
