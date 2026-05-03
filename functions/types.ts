@@ -19,6 +19,12 @@ export interface Env {
    * 未設定の場合は Host ヘッダから自動算出 (= 自身のオリジンのみ許可)。
    */
   ALLOWED_ORIGINS?: string;
+  /**
+   * Drive OAuth コールバック URL の上書き。dev で vite proxy (5173) 越しに動かすときに、
+   * Google に投げる redirect_uri が wrangler の 8788 ではなく 5173 になるよう指定する。
+   * 本番では未設定にする (リクエスト URL から自動算出)。
+   */
+  OAUTH_REDIRECT_URI?: string;
 
   // Secrets (`wrangler pages secret put` で投入)
   GOOGLE_CLIENT_SECRET: string; // Drive OAuth コールバック用

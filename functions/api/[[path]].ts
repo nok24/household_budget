@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppBindings, Env } from '../types';
 import { csrfMiddleware } from '../lib/csrf';
 import { authRouter, meRouter } from '../routes/auth';
+import { adminRouter } from '../routes/admin';
 
 // Pages Functions のキャッチオール。`/api/*` の全リクエストを Hono にディスパッチする。
 // 各サブルータは ./routes/ 配下に分割していき、ここに mount する。
@@ -23,6 +24,9 @@ app.get('/api/health', (c) =>
 // 認証 (Phase 1)
 app.route('/api/auth', authRouter);
 app.route('/api', meRouter);
+
+// admin (Phase 2): Drive 接続 / app_settings
+app.route('/api/admin', adminRouter);
 
 // 未マッチは 404
 app.notFound((c) => c.json({ error: 'not_found' }, 404));

@@ -54,3 +54,39 @@ export function parseCookieHeader(header: string | null): Map<string, string> {
   }
   return map;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Drive OAuth state cookie (CSRF 対策、callback 時に value 一致を検証)
+// ─────────────────────────────────────────────────────────────
+
+export const DRIVE_OAUTH_STATE_TTL_SEC = 10 * 60; // 10 分
+
+export function driveOAuthStateCookieName(env: Env): string {
+  return isDev(env) ? 'drive_oauth_state' : '__Host-drive-oauth-state';
+}
+
+export function serializeDriveOAuthStateCookie(env: Env, state: string): string {
+  const dev = isDev(env);
+  const parts = [
+    `${driveOAuthStateCookieName(env)}=${state}`,
+    'HttpOnly',
+    'SameSite=Lax',
+    'Path=/',
+    `Max-Age=${DRIVE_OAUTH_STATE_TTL_SEC}`,
+  ];
+  if (!dev) parts.push('Secure');
+  return parts.join('; ');
+}
+
+export function clearDriveOAuthStateCookie(env: Env): string {
+  const dev = isDev(env);
+  const parts = [
+    `${driveOAuthStateCookieName(env)}=`,
+    'HttpOnly',
+    'SameSite=Lax',
+    'Path=/',
+    'Max-Age=0',
+  ];
+  if (!dev) parts.push('Secure');
+  return parts.join('; ');
+}

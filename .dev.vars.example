@@ -13,7 +13,12 @@ DRIVE_TOKEN_AES_KEY=
 # 本番では未設定または "false" にする。
 IS_DEV=true
 
-# CSRF Origin 検証の追加許可オリジン (任意、カンマ区切り)。
-# 例: Vite を 5173、pages dev を 8788 で別ポート起動して 5173 からも fetch する場合。
-# 通常 (vite proxy で /api を pages dev に流す構成) は未設定で OK。
-# ALLOWED_ORIGINS=http://localhost:5173
+# CSRF Origin 検証の追加許可オリジン (カンマ区切り)。
+# vite proxy (5173 → 8788) では Origin ヘッダがブラウザ側のオリジン (5173) のまま届くので明示許可する。
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8788
+
+# Drive OAuth コールバック URL の上書き (dev のみ)。
+# vite proxy 越しに 5173 で動かすため、Google に投げる redirect_uri を 5173 に揃える。
+# Google Cloud Console の Authorized redirect URIs にも同じ URL を登録しておくこと。
+# 本番では設定しない (Worker のリクエスト URL から自動算出される)。
+OAUTH_REDIRECT_URI=http://localhost:5173/api/admin/drive/callback
