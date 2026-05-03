@@ -15,6 +15,30 @@ interface SettingsResponse {
   settings: Record<string, string>;
 }
 
+interface SyncStatusResponse {
+  lastLog: {
+    id: number;
+    kind: string;
+    status: 'running' | 'success' | 'error';
+    startedAt: number;
+    finishedAt: number | null;
+    fetched: number | null;
+    errorsJson: string | null;
+  } | null;
+  lastSyncedAt: number | null;
+  transactionCount: number;
+  fileCount: number;
+}
+
+interface SyncTransactionsResponse {
+  ok: true;
+  total: number;
+  fetched: number;
+  skipped: number;
+  removed: number;
+  errors: Array<{ name: string; message: string }>;
+}
+
 const SETTING_KEYS = {
   BUDGET_FOLDER_ID: 'budget_folder_id',
   BUDGET_FOLDER_NAME: 'budget_folder_name',
@@ -44,6 +68,8 @@ export default function AdminPanel() {
   const [assetFolderName, setAssetFolderName] = useState<string>('');
   const [selectorOpen, setSelectorOpen] = useState<FolderKind | null>(null);
   const [savingFolder, setSavingFolder] = useState<FolderKind | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
 
   const driveQuery = searchParams.get('drive');
@@ -67,10 +93,16 @@ export default function AdminPanel() {
     }
   }, []);
 
+  const reloadSyncStatus = useCallback(async () => {
+    const res = await apiGet<SyncStatusResponse>('/api/sync/status');
+    if (res.ok) setSyncStatus(res.data);
+  }, []);
+
   useEffect(() => {
     void reloadStatus();
     void reloadSettings();
-  }, [reloadStatus, reloadSettings]);
+    void reloadSyncStatus();
+  }, [reloadStatus, reloadSettings, reloadSyncStatus]);
 
   useEffect(() => {
     if (driveQuery === 'connected') {
@@ -141,6 +173,33 @@ export default function AdminPanel() {
       setMessage({ kind: 'error', text: '保存に失敗しました' });
     }
     setSavingFolder(null);
+  };
+
+  const onSyncTransactions = async () => {
+    setSyncBusy(true);
+    setMessage(null);
+    const res = await apiPost<SyncTransactionsResponse>('/api/sync/transactions');
+    if (res.ok) {
+      const r = res.data;
+      const errSummary = r.errors.length > 0 ? ` (${r.errors.length} 件のエラー)` : '';
+      setMessage({
+        kind: r.errors.length > 0 ? 'error' : 'success',
+        text: `同期完了: ${r.fetched} 取込 / ${r.skipped} 変更なし / ${r.removed} 削除${errSummary}`,
+      });
+      await reloadSyncStatus();
+    } else {
+      const body = res.error.body as { error?: string } | null;
+      const msg =
+        body?.error === 'budget_folder_not_set'
+          ? '家計簿フォルダが未設定です'
+          : body?.error === 'sync_in_progress'
+            ? '別の同期が実行中です'
+            : body?.error === 'drive_not_connected'
+              ? 'Drive 未接続です'
+              : '同期に失敗しました';
+      setMessage({ kind: 'error', text: msg });
+    }
+    setSyncBusy(false);
   };
 
   const onClearFolder = async (kind: FolderKind) => {
@@ -241,6 +300,40 @@ export default function AdminPanel() {
             onClear={() => void onClearFolder('asset')}
             busy={savingFolder === 'asset'}
           />
+
+          <div className="space-y-2 pt-3 border-t border-line">
+            <div className="text-xs font-medium tracking-wider text-ink-70">
+              取引データ同期 (サーバ側)
+            </div>
+            <div className="text-[11px] text-ink-40 leading-relaxed">
+              家計簿フォルダ内の CSV を Worker から読んで D1
+              に取り込みます。家族全員が同じデータを見られます。
+            </div>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-[11px] text-ink-60 tabular-nums leading-relaxed">
+                {syncStatus ? (
+                  <>
+                    最終同期:{' '}
+                    {syncStatus.lastSyncedAt
+                      ? new Date(syncStatus.lastSyncedAt).toLocaleString('ja-JP')
+                      : '未同期'}
+                    <br />
+                    取引: {syncStatus.transactionCount} 件 / ファイル: {syncStatus.fileCount} 件
+                  </>
+                ) : (
+                  '読み込み中…'
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => void onSyncTransactions()}
+                disabled={syncBusy || !budgetFolderId}
+                className="text-xs font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {syncBusy ? '同期中…' : !budgetFolderId ? 'フォルダ未設定' : 'Drive から取り込み'}
+              </button>
+            </div>
+          </div>
         </>
       )}
 
