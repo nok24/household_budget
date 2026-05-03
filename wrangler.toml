@@ -13,19 +13,11 @@ database_name = "household-budget"
 database_id = "809f32e7-7644-4e51-8c41-c3b7acfdebb5" # `wrangler d1 create household-budget` で発行された UUID
 migrations_dir = "functions/db/migrations"
 
-# 環境変数 (Secrets ではない、ビルド時公開でOKな値)
-# 本番では Cloudflare Pages Settings > Environment variables で設定する
-[vars]
-ALLOWED_EMAILS = ""        # ローカル時は .dev.vars で上書き
-ADMIN_EMAILS = ""
-GOOGLE_CLIENT_ID = ""
-# CSRF 検証で許可する追加オリジン (カンマ区切り)。空ならリクエストの Host から自動算出。
-# 開発時に複数ポートを跨ぐ場合などに使用 (例: Vite=5173 と pages dev=8788 を同時起動)。
-ALLOWED_ORIGINS = ""
-# dev (HTTP) で cookie を Secure 無し / `__Host-` 無しで発行するためのフラグ。
-# 本番では未設定または "false" にする。`.dev.vars` で IS_DEV=true を設定する運用。
-IS_DEV = ""
-
-# Secrets (`wrangler pages secret put` で投入。ローカルは .dev.vars):
-# - GOOGLE_CLIENT_SECRET
-# - DRIVE_TOKEN_AES_KEY (base64 encoded 256-bit AES key)
+# 環境変数は Cloudflare Pages Settings > Environment variables で本番設定する。
+# ローカル (wrangler pages dev) は `.dev.vars` で上書きされる。
+# ここに [vars] で空文字を宣言すると本番ダッシュボードで「空文字で上書き」になり
+# 削除もできなくなるので、敢えて [vars] 自体を持たない。
+#
+# 本番に設定する Plaintext: GOOGLE_CLIENT_ID / ALLOWED_EMAILS / ADMIN_EMAILS
+# 本番に設定する Secret:    GOOGLE_CLIENT_SECRET / DRIVE_TOKEN_AES_KEY
+# 本番には設定しない (dev のみ): IS_DEV, ALLOWED_ORIGINS
