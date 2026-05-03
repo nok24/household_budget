@@ -68,18 +68,19 @@ function listMonthsBetween(start: string, end: string): string[] {
 }
 
 /**
- * アンカーから各月の月末残高を計算。範囲は「取引の最古月（or アンカー月）〜現在月」
- * を連続して埋める。取引のない月もエントリを返すので、ダッシュボードで未来月や
- * 取引のない月を選んでも残高が表示される。
+ * アンカーから各月の月末残高を計算 (pure)。
+ * 引数 `applied` は overrides 適用済みの取引配列。pattern にマッチするものをここで抽出する。
+ *
+ * 範囲は「取引の最古月 (or アンカー月) 〜現在月」を連続して埋める。取引のない月も
+ * エントリを返すので、ダッシュボードで未来月や取引のない月を選んでも残高が表示される。
  */
-export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<MonthlyBalance[]> {
+export function computeMonthlyBalancesFromArray(
+  applied: DbTransaction[],
+  anchor: AccountAnchor,
+): MonthlyBalance[] {
   if (!anchor.pattern || !anchor.asOfDate) return [];
-  const rows = await loadAccountTransactions(anchor.pattern);
+  const rows = applied.filter((t) => matchesPattern(t.account, anchor.pattern));
 
-  // 計算範囲の決定。取引・アンカー月・現在月を内包しつつ、取引が無くても
-  // 過去 24 ヶ月は遡って表示できるよう range を広げる。これにより:
-  // - pattern にマッチする取引がゼロでも、過去月にアンカー残高が一貫して表示される
-  // - 取引データが短い口座でも、月切替で過去を見てもKPIが消えない
   const knownMonths = new Set<string>();
   for (const t of rows) {
     if (t.yearMonth) knownMonths.add(t.yearMonth);
@@ -95,8 +96,6 @@ export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<Mon
   const latest = sortedKnown[sortedKnown.length - 1];
   const months = listMonthsBetween(earliest, latest);
 
-  // アンカー月末の残高を最初に求める:
-  //   bal(asOf月末) = anchor.balance + Σ(asOfDate < date ≤ 月末 の取引)
   const asOfMonthEnd = lastDateOfMonth(anchorMonth);
   const startExclusiveDate = anchor.asOfDate;
   const flowAfterAnchorThisMonth = rows.reduce((s, t) => {
@@ -111,11 +110,9 @@ export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<Mon
     monthlyFlow.set(ym, sumAmountInRange(rows, `${ym}-01`, lastDateOfMonth(ym)));
   }
 
-  // アンカー月から前後に走査
   const balanceByMonth = new Map<string, number>();
   balanceByMonth.set(anchorMonth, balanceAtAnchorMonthEnd);
 
-  // 過去方向
   let cursor = anchorMonth;
   while (cursor > earliest) {
     const prev = shiftMonth(cursor, -1);
@@ -124,7 +121,6 @@ export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<Mon
     cursor = prev;
   }
 
-  // 未来方向
   cursor = anchorMonth;
   while (cursor < latest) {
     const next = shiftMonth(cursor, 1);
@@ -138,6 +134,17 @@ export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<Mon
     balance: balanceByMonth.get(ym) ?? 0,
     flow: monthlyFlow.get(ym) ?? 0,
   }));
+}
+
+/**
+ * Dexie 経由のレガシー版 (旧 ページ用)。中身は computeMonthlyBalancesFromArray を使う。
+ */
+export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<MonthlyBalance[]> {
+  if (!anchor.pattern || !anchor.asOfDate) return [];
+  const rows = await loadAccountTransactions(anchor.pattern);
+  // pattern フィルタは loadAccountTransactions 側で実施済みなので、空 anchor pattern を渡しても OK だが
+  // FromArray は再度 pattern でフィルタする (重複しても結果は同じ)。簡潔のためそのまま渡す。
+  return computeMonthlyBalancesFromArray(rows, anchor);
 }
 
 /**

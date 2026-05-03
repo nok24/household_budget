@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import dayjs from 'dayjs';
 import EditTransactionModal from '@/components/EditTransactionModal';
 import { useBudgetStore } from '@/store/budget';
-import { db, type DbTransaction } from '@/lib/db';
-import { getAllTransactionsApplied } from '@/lib/aggregate';
+import { type DbTransaction } from '@/lib/db';
+import { useAllTransactions, useAppliedTransactions } from '@/lib/queries';
+import { listAvailableMonths } from '@/lib/aggregate';
 import { colorForCategory } from '@/lib/categories';
 import { findMember, inferMemberId, UNASSIGNED_MEMBER_ID } from '@/lib/members';
 import { cn, formatYen } from '@/lib/utils';
@@ -44,19 +44,26 @@ export default function Transactions() {
   } | null>(null);
 
   const budgetConfig = useBudgetStore((s) => s.config);
-  const allApplied = useLiveQuery(() => getAllTransactionsApplied(), [], []);
-  const allRaw = useLiveQuery(() => db.transactions.toArray(), [], []);
-  const months = useLiveQuery(
-    async () => {
-      const set = new Set<string>();
-      await db.transactions.each((t) => {
-        if (t.yearMonth) set.add(t.yearMonth);
-      });
-      return [...set].sort().reverse();
-    },
-    [],
-    [],
-  );
+  const { data: allApplied } = useAppliedTransactions();
+  const allTxQuery = useAllTransactions();
+  const allRaw = useMemo<DbTransaction[]>(() => {
+    const txs = allTxQuery.data ?? [];
+    return txs.map((t) => ({
+      id: t.id,
+      sourceFileId: t.sourceFileId,
+      date: t.date,
+      yearMonth: t.yearMonth,
+      amount: t.amount,
+      contentName: t.contentName,
+      account: t.account,
+      largeCategory: t.largeCategory,
+      midCategory: t.midCategory,
+      memo: t.memo,
+      isTarget: t.isTarget,
+      isTransfer: t.isTransfer,
+    }));
+  }, [allTxQuery.data]);
+  const months = useMemo(() => listAvailableMonths(allApplied).reverse(), [allApplied]);
 
   const rawById = useMemo(() => {
     const m = new Map<string, DbTransaction>();

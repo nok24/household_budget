@@ -33,6 +33,98 @@ async function loadMonth(yearMonth: string): Promise<DbTransaction[]> {
   return applyOverridesToRows(raw);
 }
 
+// ─────────────────────────────────────────────────────────────
+// Pure 版 (引数で applied 取引配列を受ける、TanStack Query 経由のフロント用)
+// 既存の async 関数 (db.transactions / overrides を読む) はレガシーページ用に残す。
+// ─────────────────────────────────────────────────────────────
+
+export function summarizeMonth(applied: DbTransaction[], yearMonth: string): MonthSummary {
+  let income = 0;
+  let expense = 0;
+  let count = 0;
+  for (const t of applied) {
+    if (t.yearMonth !== yearMonth) continue;
+    if (!shouldCount(t)) continue;
+    if (t.amount >= 0) income += t.amount;
+    else expense += -t.amount;
+    count += 1;
+  }
+  return { yearMonth, income, expense, balance: income - expense, count };
+}
+
+export function summarizeMonthlyTrend(
+  applied: DbTransaction[],
+  anchorYearMonth: string,
+  monthsBack: number,
+): MonthSummary[] {
+  const months: string[] = [];
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    months.push(shiftMonth(anchorYearMonth, -i));
+  }
+  return months.map((m) => summarizeMonth(applied, m));
+}
+
+export function summarizeYearToDate(applied: DbTransaction[], yearMonth: string): MonthSummary {
+  const months = listYtdMonths(yearMonth);
+  let income = 0;
+  let expense = 0;
+  let count = 0;
+  for (const m of months) {
+    const s = summarizeMonth(applied, m);
+    income += s.income;
+    expense += s.expense;
+    count += s.count;
+  }
+  return { yearMonth, income, expense, balance: income - expense, count };
+}
+
+export function breakdownCategories(applied: DbTransaction[], yearMonth: string): CategoryAgg[] {
+  const map = new Map<string, CategoryAgg>();
+  for (const t of applied) {
+    if (t.yearMonth !== yearMonth) continue;
+    if (!isExpense(t)) continue;
+    const key = t.largeCategory || '未分類';
+    const v = map.get(key) ?? { name: key, amount: 0, count: 0 };
+    v.amount += -t.amount;
+    v.count += 1;
+    map.set(key, v);
+  }
+  return [...map.values()].sort((a, b) => b.amount - a.amount);
+}
+
+export function breakdownCategoriesYTD(applied: DbTransaction[], yearMonth: string): CategoryAgg[] {
+  const months = listYtdMonths(yearMonth);
+  const map = new Map<string, CategoryAgg>();
+  for (const m of months) {
+    for (const c of breakdownCategories(applied, m)) {
+      const v = map.get(c.name) ?? { name: c.name, amount: 0, count: 0 };
+      v.amount += c.amount;
+      v.count += c.count;
+      map.set(c.name, v);
+    }
+  }
+  return [...map.values()].sort((a, b) => b.amount - a.amount);
+}
+
+export function pickRecentTransactionsForMonth(
+  applied: DbTransaction[],
+  yearMonth: string,
+  limit: number,
+): DbTransaction[] {
+  return applied
+    .filter((t) => t.yearMonth === yearMonth && shouldCount(t))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+    .slice(0, limit);
+}
+
+export function listAvailableMonths(applied: DbTransaction[]): string[] {
+  const set = new Set<string>();
+  for (const t of applied) {
+    if (t.yearMonth) set.add(t.yearMonth);
+  }
+  return [...set].sort();
+}
+
 export async function getMonthSummary(yearMonth: string): Promise<MonthSummary> {
   const rows = await loadMonth(yearMonth);
   let income = 0;

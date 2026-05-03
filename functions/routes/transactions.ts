@@ -37,34 +37,36 @@ transactionsRouter.get('/', async (c) => {
 });
 
 interface SerializedTransaction {
-  id: number;
-  mfRowId: string;
+  /** フロント互換のため MF Row ID を id として返す (旧 DbTransaction.id と同じ) */
+  id: string;
+  /** 内部 surrogate id (主に override 永続化で利用、Phase 4) */
+  surrogateId: number;
   sourceFileId: string;
   date: string;
   yearMonth: string;
   amount: number;
-  contentName: string | null;
-  account: string | null;
-  largeCategory: string | null;
-  midCategory: string | null;
-  memo: string | null;
+  contentName: string;
+  account: string;
+  largeCategory: string;
+  midCategory: string;
+  memo: string;
   isTarget: boolean;
   isTransfer: boolean;
 }
 
 function serialize(row: typeof transactions.$inferSelect): SerializedTransaction {
   return {
-    id: row.id,
-    mfRowId: row.mfRowId,
+    id: row.mfRowId,
+    surrogateId: row.id,
     sourceFileId: row.sourceFileId,
     date: row.date,
     yearMonth: row.yearMonth,
     amount: row.amount,
-    contentName: row.contentName,
-    account: row.account,
-    largeCategory: row.largeCategory,
-    midCategory: row.midCategory,
-    memo: row.memo,
+    contentName: row.contentName ?? '',
+    account: row.account ?? '',
+    largeCategory: row.largeCategory ?? '',
+    midCategory: row.midCategory ?? '',
+    memo: row.memo ?? '',
     isTarget: row.isTarget === 1,
     isTransfer: row.isTransfer === 1,
   };
