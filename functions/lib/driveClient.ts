@@ -206,6 +206,71 @@ async function listSharedDrives(accessToken: string): Promise<DriveFolder[]> {
   return drives;
 }
 
+// ─────────────────────────────────────────────────────────────
+// CSV ファイル取得 (sync 用)
+// ─────────────────────────────────────────────────────────────
+
+export interface DriveCsvFile {
+  id: string;
+  name: string;
+  /** RFC3339 文字列。差分判定キー */
+  modifiedTime: string;
+}
+
+/**
+ * 指定フォルダ直下にある CSV ファイル一覧を取得する。
+ * MIME type が text/csv のものに加え、`.csv` 拡張子で名前マッチもする。
+ * MF のエクスポート CSV を想定。
+ */
+export async function listCsvFilesInFolder(
+  db: Database,
+  env: Env,
+  folderId: string,
+): Promise<DriveCsvFile[]> {
+  const accessToken = await getValidDriveAccessToken(db, env);
+  const q = [
+    `'${escapeQ(folderId)}' in parents`,
+    `trashed = false`,
+    `(mimeType = 'text/csv' or name contains '.csv')`,
+  ].join(' and ');
+  const params = new URLSearchParams({
+    q,
+    fields: 'files(id,name,modifiedTime),nextPageToken',
+    orderBy: 'name',
+    pageSize: '100',
+    supportsAllDrives: 'true',
+    includeItemsFromAllDrives: 'true',
+    corpora: 'allDrives',
+  });
+  const files: DriveCsvFile[] = [];
+  let pageToken: string | undefined;
+  do {
+    if (pageToken) params.set('pageToken', pageToken);
+    const res = await driveFetch(accessToken, `/files?${params.toString()}`);
+    const json = (await res.json()) as FilesListResponse<DriveCsvFile>;
+    files.push(...json.files);
+    pageToken = json.nextPageToken;
+  } while (pageToken);
+  return files;
+}
+
+/**
+ * 指定ファイルの中身をバイト列で取得する (alt=media)。
+ * Shift-JIS な CSV 等もそのまま ArrayBuffer で返り、呼び出し側で decode する。
+ */
+export async function downloadFileBytes(
+  db: Database,
+  env: Env,
+  fileId: string,
+): Promise<ArrayBuffer> {
+  const accessToken = await getValidDriveAccessToken(db, env);
+  const res = await driveFetch(
+    accessToken,
+    `/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
+  );
+  return res.arrayBuffer();
+}
+
 /**
  * 指定フォルダの単体メタを取る (name 確認等)。
  */

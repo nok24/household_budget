@@ -3,6 +3,8 @@ import type { AppBindings, Env } from '../types';
 import { csrfMiddleware } from '../lib/csrf';
 import { authRouter, meRouter } from '../routes/auth';
 import { adminRouter } from '../routes/admin';
+import { syncRouter } from '../routes/sync';
+import { transactionsRouter } from '../routes/transactions';
 
 // Pages Functions のキャッチオール。`/api/*` の全リクエストを Hono にディスパッチする。
 // 各サブルータは ./routes/ 配下に分割していき、ここに mount する。
@@ -27,6 +29,10 @@ app.route('/api', meRouter);
 
 // admin (Phase 2): Drive 接続 / app_settings
 app.route('/api/admin', adminRouter);
+
+// 同期 / 取引読み取り (Phase 3 PR-B)
+app.route('/api/sync', syncRouter);
+app.route('/api/transactions', transactionsRouter);
 
 // 未マッチは 404
 app.notFound((c) => c.json({ error: 'not_found' }, 404));
