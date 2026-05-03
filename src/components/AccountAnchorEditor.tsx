@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useAuthStore } from '@/store/auth';
 import { useBudgetStore } from '@/store/budget';
 import { cn } from '@/lib/utils';
 import type { AccountAnchor } from '@/types';
@@ -32,8 +31,6 @@ export default function AccountAnchorEditor() {
   const status = useBudgetStore((s) => s.status);
   const error = useBudgetStore((s) => s.error);
   const save = useBudgetStore((s) => s.save);
-  const accessToken = useAuthStore((s) => s.accessToken);
-  const ensureFreshToken = useAuthStore((s) => s.ensureFreshToken);
 
   if (!config) {
     return <p className="text-sm text-ink-60">予算データを読み込み中…</p>;
@@ -65,8 +62,7 @@ export default function AccountAnchorEditor() {
   }
 
   async function onSave() {
-    const t = (await ensureFreshToken()) ?? accessToken;
-    if (t) await save(t);
+    await save();
   }
 
   return (

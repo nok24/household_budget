@@ -18,6 +18,8 @@ export const SETTING_KEYS = {
   LAST_SYNCED_TRANSACTIONS_AT: 'last_synced_transactions_at',
   /** 直近の資産同期成功時刻 (unix ms) */
   LAST_SYNCED_ASSETS_AT: 'last_synced_assets_at',
+  /** BudgetConfig.settings (fiscalMonthStartDay 等) を JSON で保存 */
+  BUDGET_SETTINGS_JSON: 'budget_settings_json',
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];

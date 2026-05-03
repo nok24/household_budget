@@ -17,7 +17,6 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useAuthStore } from '@/store/auth';
 import { useBudgetStore } from '@/store/budget';
 import { getDistinctLargeCategoriesApplied } from '@/lib/aggregate';
 import { orderCategories } from '@/lib/budget';
@@ -31,8 +30,6 @@ export default function CategoryOrderEditor() {
   const status = useBudgetStore((s) => s.status);
   const error = useBudgetStore((s) => s.error);
   const save = useBudgetStore((s) => s.save);
-  const accessToken = useAuthStore((s) => s.accessToken);
-  const ensureFreshToken = useAuthStore((s) => s.ensureFreshToken);
 
   const known = useLiveQuery(() => getDistinctLargeCategoriesApplied(), [], []);
 
@@ -64,8 +61,7 @@ export default function CategoryOrderEditor() {
   }
 
   async function onSave() {
-    const t = (await ensureFreshToken()) ?? accessToken;
-    if (t) await save(t);
+    await save();
   }
 
   function handleDragEnd(event: DragEndEvent) {

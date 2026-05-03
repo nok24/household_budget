@@ -42,18 +42,11 @@ export default function Layout() {
     };
   }, [hydrate]);
 
-  // フォルダがあれば budget.json を全画面共通で先読み
+  // 認証済み (= cookie が効いている) なら D1 から budget config を先読み
   useEffect(() => {
-    if (!folder || !accessToken || budgetConfig) return;
-    let cancelled = false;
-    void (async () => {
-      const t = (await ensureFreshToken()) ?? accessToken;
-      if (!cancelled && t) await hydrateBudget(t, folder.id);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [folder, accessToken, budgetConfig, ensureFreshToken, hydrateBudget]);
+    if (budgetConfig) return;
+    void hydrateBudget();
+  }, [budgetConfig, hydrateBudget]);
 
   // フォルダがあれば overrides.json を Drive から同期
   useEffect(() => {
