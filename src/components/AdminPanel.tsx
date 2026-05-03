@@ -1,23 +1,14 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { apiGet, apiPost, apiFetch } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 
 interface DriveStatusResponse {
   connected: boolean;
 }
 
-interface SettingsResponse {
-  settings: Record<string, string>;
-}
-
 interface ConnectResponse {
   authUrl: string;
 }
-
-const SETTING_KEYS = {
-  BUDGET_FOLDER_ID: 'budget_folder_id',
-  ASSET_FOLDER_ID: 'asset_folder_id',
-} as const;
 
 const DRIVE_ERROR_MESSAGES: Record<string, string> = {
   invalid_state: 'state 不一致 (CSRF 防御)。もう一度接続を試してください',
@@ -33,11 +24,6 @@ export default function AdminPanel() {
   const [statusBusy, setStatusBusy] = useState(false);
   const [connectBusy, setConnectBusy] = useState(false);
   const [disconnectBusy, setDisconnectBusy] = useState(false);
-  const [settingsBusy, setSettingsBusy] = useState(false);
-  const [budgetFolderId, setBudgetFolderId] = useState('');
-  const [assetFolderId, setAssetFolderId] = useState('');
-  const [savedBudgetFolderId, setSavedBudgetFolderId] = useState('');
-  const [savedAssetFolderId, setSavedAssetFolderId] = useState('');
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
 
   const driveQuery = searchParams.get('drive');
@@ -50,22 +36,10 @@ export default function AdminPanel() {
     setStatusBusy(false);
   }, []);
 
-  const reloadSettings = useCallback(async () => {
-    const res = await apiGet<SettingsResponse>('/api/admin/settings');
-    if (res.ok) {
-      const s = res.data.settings;
-      setBudgetFolderId(s[SETTING_KEYS.BUDGET_FOLDER_ID] ?? '');
-      setAssetFolderId(s[SETTING_KEYS.ASSET_FOLDER_ID] ?? '');
-      setSavedBudgetFolderId(s[SETTING_KEYS.BUDGET_FOLDER_ID] ?? '');
-      setSavedAssetFolderId(s[SETTING_KEYS.ASSET_FOLDER_ID] ?? '');
-    }
-  }, []);
-
   // 初回ロード
   useEffect(() => {
     void reloadStatus();
-    void reloadSettings();
-  }, [reloadStatus, reloadSettings]);
+  }, [reloadStatus]);
 
   // callback リダイレクト後のメッセージ表示 + URL クリーンアップ
   useEffect(() => {
@@ -113,29 +87,6 @@ export default function AdminPanel() {
     setDisconnectBusy(false);
   };
 
-  const onSaveSettings = async () => {
-    setSettingsBusy(true);
-    setMessage(null);
-    const res = await apiFetch<SettingsResponse>('/api/admin/settings', {
-      method: 'PUT',
-      body: {
-        [SETTING_KEYS.BUDGET_FOLDER_ID]: budgetFolderId.trim(),
-        [SETTING_KEYS.ASSET_FOLDER_ID]: assetFolderId.trim(),
-      },
-    });
-    if (res.ok) {
-      setSavedBudgetFolderId(res.data.settings[SETTING_KEYS.BUDGET_FOLDER_ID] ?? '');
-      setSavedAssetFolderId(res.data.settings[SETTING_KEYS.ASSET_FOLDER_ID] ?? '');
-      setMessage({ kind: 'success', text: 'フォルダ ID を保存しました' });
-    } else {
-      setMessage({ kind: 'error', text: '保存に失敗しました' });
-    }
-    setSettingsBusy(false);
-  };
-
-  const settingsDirty =
-    budgetFolderId.trim() !== savedBudgetFolderId || assetFolderId.trim() !== savedAssetFolderId;
-
   return (
     <section className="card p-6 space-y-5 border-accent/30">
       <div>
@@ -144,8 +95,8 @@ export default function AdminPanel() {
         </h2>
         <p className="text-xs text-ink-60 mt-1">
           Worker から Drive の CSV を読むための接続。1
-          アカウントだけ繋げば家族全員が同じデータを共有できます。Phase 3 までは旧フォルダ Picker
-          と並存します。
+          アカウントだけ繋げば家族全員が同じデータを共有できます。Phase 3 で同期 API
+          実装時にフォルダ選択 UI も整備予定。
         </p>
       </div>
 
@@ -191,50 +142,6 @@ export default function AdminPanel() {
             >
               {connectBusy ? '接続中…' : 'Drive を接続'}
             </button>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-3 pt-3 border-t border-line">
-        <div className="text-xs font-medium tracking-wider text-ink-70">サーバ側フォルダ ID</div>
-        <p className="text-[11px] text-ink-40 leading-relaxed">
-          Drive で対象フォルダを開いた URL の <code>/folders/XXXXXX</code> 部分を貼り付けます。
-          Phase 3 で Worker 側の同期 API がこの値を使います。
-        </p>
-
-        <label className="block space-y-1">
-          <span className="text-xs text-ink-60">家計簿 (取引 CSV) フォルダ ID</span>
-          <input
-            type="text"
-            value={budgetFolderId}
-            onChange={(e) => setBudgetFolderId(e.target.value)}
-            placeholder="1ABCdef…"
-            className="w-full text-sm font-numeric px-3 py-2 rounded border border-line focus:outline-none focus:border-accent"
-          />
-        </label>
-
-        <label className="block space-y-1">
-          <span className="text-xs text-ink-60">資産 CSV フォルダ ID (任意)</span>
-          <input
-            type="text"
-            value={assetFolderId}
-            onChange={(e) => setAssetFolderId(e.target.value)}
-            placeholder="1ABCdef…"
-            className="w-full text-sm font-numeric px-3 py-2 rounded border border-line focus:outline-none focus:border-accent"
-          />
-        </label>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void onSaveSettings()}
-            disabled={!settingsDirty || settingsBusy}
-            className="text-xs font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-50"
-          >
-            {settingsBusy ? '保存中…' : '保存'}
-          </button>
-          {settingsDirty && !settingsBusy && (
-            <span className="text-[11px] text-ink-40">未保存の変更があります</span>
           )}
         </div>
       </div>
