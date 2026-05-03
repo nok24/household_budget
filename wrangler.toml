@@ -10,7 +10,7 @@ pages_build_output_dir = "dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "household-budget"
-database_id = "REPLACE_WITH_REAL_DB_ID" # `wrangler d1 create household-budget` で発行された UUID
+database_id = "809f32e7-7644-4e51-8c41-c3b7acfdebb5" # `wrangler d1 create household-budget` で発行された UUID
 migrations_dir = "functions/db/migrations"
 
 # 環境変数 (Secrets ではない、ビルド時公開でOKな値)
