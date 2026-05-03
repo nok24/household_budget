@@ -39,6 +39,27 @@ interface SyncTransactionsResponse {
   errors: Array<{ name: string; message: string }>;
 }
 
+interface MigrateBudgetSummary {
+  members: number;
+  categoryOrder: number;
+  annualBudgets: number;
+  accountAnchors: number;
+  sourceFile: { id: string; name: string; modifiedTime: string };
+}
+
+interface MigrateBudgetDryRunResponse {
+  ok: true;
+  dryRun: true;
+  summary: MigrateBudgetSummary;
+  alreadyHasData: boolean;
+}
+
+interface MigrateBudgetRunResponse {
+  ok: true;
+  dryRun: false;
+  summary: MigrateBudgetSummary;
+}
+
 const SETTING_KEYS = {
   BUDGET_FOLDER_ID: 'budget_folder_id',
   BUDGET_FOLDER_NAME: 'budget_folder_name',
@@ -70,6 +91,8 @@ export default function AdminPanel() {
   const [savingFolder, setSavingFolder] = useState<FolderKind | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [migrateBusy, setMigrateBusy] = useState(false);
+  const [migrateDryRun, setMigrateDryRun] = useState<MigrateBudgetDryRunResponse | null>(null);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
 
   const driveQuery = searchParams.get('drive');
@@ -202,6 +225,49 @@ export default function AdminPanel() {
     setSyncBusy(false);
   };
 
+  const onMigrateBudget = async (mode: 'dry-run' | 'run' | 'force') => {
+    setMigrateBusy(true);
+    setMessage(null);
+    const res = await apiFetch<MigrateBudgetDryRunResponse | MigrateBudgetRunResponse>(
+      '/api/admin/migrate/budget',
+      {
+        method: 'POST',
+        body: mode === 'dry-run' ? { dryRun: true } : mode === 'force' ? { force: true } : {},
+      },
+    );
+    if (res.ok) {
+      if (res.data.dryRun) {
+        setMigrateDryRun(res.data);
+        setMessage({
+          kind: 'success',
+          text: `dry-run 完了: メンバー ${res.data.summary.members} 件 / 並び順 ${res.data.summary.categoryOrder} 件 / 年間予算 ${res.data.summary.annualBudgets} 件 / アンカー ${res.data.summary.accountAnchors} 件${res.data.alreadyHasData ? ' (D1 に既存データあり、上書きには「強制実行」が必要)' : ''}`,
+        });
+      } else {
+        setMigrateDryRun(null);
+        setMessage({
+          kind: 'success',
+          text: `移行完了: メンバー ${res.data.summary.members} / 並び順 ${res.data.summary.categoryOrder} / 年間予算 ${res.data.summary.annualBudgets} / アンカー ${res.data.summary.accountAnchors} を D1 に取り込みました`,
+        });
+        // 移行後は budget hydrate を再実行 (ページリロードで反映される)
+        window.location.reload();
+      }
+    } else {
+      const body = res.error.body as { error?: string; detail?: string } | null;
+      const msg =
+        body?.error === 'budget_folder_not_set'
+          ? '家計簿フォルダが未設定です'
+          : body?.error === 'budget_json_not_found'
+            ? '家計簿フォルダ内に budget.json が見つかりません'
+            : body?.error === 'already_migrated'
+              ? 'D1 に既存データあり。上書きするには「強制実行」を選択してください'
+              : body?.error === 'parse_failed'
+                ? `budget.json のパースに失敗: ${body.detail ?? ''}`
+                : '移行に失敗しました';
+      setMessage({ kind: 'error', text: msg });
+    }
+    setMigrateBusy(false);
+  };
+
   const onClearFolder = async (kind: FolderKind) => {
     if (!window.confirm(`${kind === 'budget' ? '家計簿' : '資産'}フォルダの設定を解除しますか？`)) {
       return;
@@ -300,6 +366,64 @@ export default function AdminPanel() {
             onClear={() => void onClearFolder('asset')}
             busy={savingFolder === 'asset'}
           />
+
+          <div className="space-y-2 pt-3 border-t border-line">
+            <div className="text-xs font-medium tracking-wider text-ink-70">
+              旧 budget.json から D1 へ移行
+            </div>
+            <div className="text-[11px] text-ink-40 leading-relaxed">
+              旧 frontend Drive Picker 経路で作った budget.json (メンバー / 年間予算 /
+              カテゴリ並び順 / アンカー) を D1 に取り込みます。家計簿フォルダ直下の budget.json
+              を読みます。dry-run は読むだけ、run は D1 に保存します。
+            </div>
+            {migrateDryRun && (
+              <div className="text-[11px] text-ink-60 bg-canvas px-2 py-1.5 rounded border border-line">
+                プレビュー: メンバー {migrateDryRun.summary.members} / 並び順{' '}
+                {migrateDryRun.summary.categoryOrder} / 年間予算{' '}
+                {migrateDryRun.summary.annualBudgets} / アンカー{' '}
+                {migrateDryRun.summary.accountAnchors}
+                {migrateDryRun.alreadyHasData && (
+                  <span className="text-rose-700"> · D1 に既存データあり</span>
+                )}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void onMigrateBudget('dry-run')}
+                disabled={migrateBusy || !budgetFolderId}
+                className="text-xs font-medium px-3 py-1.5 rounded-md border border-line hover:bg-canvas disabled:opacity-50"
+              >
+                {migrateBusy ? '実行中…' : 'プレビュー (dry-run)'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void onMigrateBudget('run')}
+                disabled={migrateBusy || !budgetFolderId}
+                className="text-xs font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-50"
+              >
+                取り込み実行
+              </button>
+              {migrateDryRun?.alreadyHasData && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        'D1 の既存データを budget.json で上書きします。よろしいですか？',
+                      )
+                    ) {
+                      void onMigrateBudget('force');
+                    }
+                  }}
+                  disabled={migrateBusy}
+                  className="text-xs font-medium px-3 py-1.5 rounded-md border border-rose-700 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                >
+                  強制実行
+                </button>
+              )}
+            </div>
+          </div>
 
           <div className="space-y-2 pt-3 border-t border-line">
             <div className="text-xs font-medium tracking-wider text-ink-70">

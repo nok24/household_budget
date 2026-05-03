@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useAuthStore } from '@/store/auth';
 import { useBudgetStore } from '@/store/budget';
 import { getDistinctAccounts } from '@/lib/aggregate';
 import { inferMemberId, MEMBER_PRESET_COLORS, newMember } from '@/lib/members';
@@ -14,8 +13,6 @@ export default function MemberEditor() {
   const status = useBudgetStore((s) => s.status);
   const error = useBudgetStore((s) => s.error);
   const save = useBudgetStore((s) => s.save);
-  const accessToken = useAuthStore((s) => s.accessToken);
-  const ensureFreshToken = useAuthStore((s) => s.ensureFreshToken);
 
   const accounts = useLiveQuery(() => getDistinctAccounts(), [], []);
 
@@ -70,8 +67,7 @@ export default function MemberEditor() {
   }
 
   async function onSave() {
-    const t = (await ensureFreshToken()) ?? accessToken;
-    if (t) await save(t);
+    await save();
   }
 
   const unassigned = accounts.filter((a) => !accountAssignments.get(a.name));

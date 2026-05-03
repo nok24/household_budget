@@ -16,8 +16,15 @@ import {
   revokeRefreshToken,
 } from '../lib/driveOAuth';
 import { SECRET_KEYS, deleteSecret, getSecret, hasSecret, putSecret } from '../lib/secrets';
-import { SETTING_KEYS, getAllSettings, putSettings } from '../lib/appSettings';
-import { DriveApiError, DriveNotConnectedError, listFolderChildren } from '../lib/driveClient';
+import { SETTING_KEYS, getAllSettings, getSetting, putSettings } from '../lib/appSettings';
+import {
+  DriveApiError,
+  DriveNotConnectedError,
+  downloadFileBytes,
+  findFileByNameInFolder,
+  listFolderChildren,
+} from '../lib/driveClient';
+import { hasBudgetData, validateBudgetConfig, writeBudgetConfig } from '../lib/budgetConfig';
 
 export const adminRouter = new Hono<AppBindings>();
 
@@ -178,6 +185,81 @@ adminRouter.get('/settings', async (c) => {
   const db = getDb(c.env);
   const all = await getAllSettings(db);
   return c.json({ settings: all });
+});
+
+// ─────────────────────────────────────────────────────────────
+// budget.json (旧 frontend Drive Picker 経路) → D1 への移行
+// ─────────────────────────────────────────────────────────────
+
+interface MigrateBudgetBody {
+  /** dryRun=true: 何件読み込むかのプレビューだけ返して D1 を変更しない */
+  dryRun?: boolean;
+  /** force=true: D1 に既にデータがあっても上書きする */
+  force?: boolean;
+}
+
+adminRouter.post('/migrate/budget', async (c) => {
+  const body = ((await c.req.json().catch(() => ({}))) ?? {}) as MigrateBudgetBody;
+  const dryRun = body.dryRun === true;
+  const force = body.force === true;
+
+  const db = getDb(c.env);
+  const folderId = await getSetting(db, SETTING_KEYS.BUDGET_FOLDER_ID);
+  if (!folderId) {
+    return c.json({ error: 'budget_folder_not_set' }, 400);
+  }
+
+  let fileMeta;
+  try {
+    fileMeta = await findFileByNameInFolder(db, c.env, folderId, 'budget.json');
+  } catch (e) {
+    if (e instanceof DriveNotConnectedError) {
+      return c.json({ error: 'drive_not_connected' }, 409);
+    }
+    if (e instanceof DriveApiError) {
+      return c.json({ error: 'drive_api_error', status: e.status }, 502);
+    }
+    throw e;
+  }
+  if (!fileMeta) {
+    return c.json({ error: 'budget_json_not_found' }, 404);
+  }
+
+  let parsed;
+  try {
+    const buf = await downloadFileBytes(db, c.env, fileMeta.id);
+    const text = new TextDecoder().decode(buf);
+    const json = JSON.parse(text);
+    parsed = validateBudgetConfig(json);
+  } catch (e) {
+    return c.json(
+      { error: 'parse_failed', detail: e instanceof Error ? e.message : 'unknown' },
+      422,
+    );
+  }
+
+  const summary = {
+    members: parsed.members.length,
+    categoryOrder: parsed.categoryOrder.length,
+    annualBudgets: Object.keys(parsed.budgets.annual).length,
+    accountAnchors: parsed.accountAnchors.length,
+    sourceFile: { id: fileMeta.id, name: fileMeta.name, modifiedTime: fileMeta.modifiedTime },
+  };
+
+  if (dryRun) {
+    const alreadyHasData = await hasBudgetData(db);
+    return c.json({ ok: true, dryRun: true, summary, alreadyHasData });
+  }
+
+  if (!force) {
+    const alreadyHasData = await hasBudgetData(db);
+    if (alreadyHasData) {
+      return c.json({ error: 'already_migrated', summary }, 409);
+    }
+  }
+
+  await writeBudgetConfig(db, parsed);
+  return c.json({ ok: true, dryRun: false, summary });
 });
 
 adminRouter.put('/settings', async (c) => {

@@ -272,6 +272,38 @@ export async function downloadFileBytes(
 }
 
 /**
+ * 指定フォルダ直下に名前一致するファイルを 1 件探す。
+ * 見つからなければ null。
+ */
+export async function findFileByNameInFolder(
+  db: Database,
+  env: Env,
+  parentId: string,
+  name: string,
+): Promise<{ id: string; name: string; modifiedTime: string } | null> {
+  const accessToken = await getValidDriveAccessToken(db, env);
+  const q = [
+    `'${escapeQ(parentId)}' in parents`,
+    `name = '${escapeQ(name)}'`,
+    `trashed = false`,
+  ].join(' and ');
+  const params = new URLSearchParams({
+    q,
+    fields: 'files(id,name,modifiedTime)',
+    pageSize: '10',
+    orderBy: 'modifiedTime desc',
+    supportsAllDrives: 'true',
+    includeItemsFromAllDrives: 'true',
+    corpora: 'allDrives',
+  });
+  const res = await driveFetch(accessToken, `/files?${params.toString()}`);
+  const json = (await res.json()) as {
+    files: Array<{ id: string; name: string; modifiedTime: string }>;
+  };
+  return json.files[0] ?? null;
+}
+
+/**
  * 指定フォルダの単体メタを取る (name 確認等)。
  */
 export async function getFolderMeta(

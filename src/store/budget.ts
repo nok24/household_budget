@@ -1,47 +1,39 @@
 import { create } from 'zustand';
 import type { BudgetConfig } from '@/types';
-import { loadOrInitBudget, saveBudget } from '@/lib/budget';
+import { apiFetch, apiGet } from '@/lib/api';
 
 type Status = 'idle' | 'loading' | 'saving' | 'error';
 
 interface BudgetState {
   status: Status;
   config: BudgetConfig | null;
-  fileId: string | null;
-  modifiedTime: string | null;
   error: string | null;
   isDirty: boolean;
 
-  hydrate: (accessToken: string, folderId: string) => Promise<void>;
+  /** D1 から最新の予算設定を取得して store に流し込む */
+  hydrate: () => Promise<void>;
   setConfig: (updater: (prev: BudgetConfig) => BudgetConfig) => void;
-  save: (accessToken: string) => Promise<void>;
+  /** 現在の config を D1 に PUT する */
+  save: () => Promise<void>;
   reset: () => void;
 }
 
 export const useBudgetStore = create<BudgetState>((set, get) => ({
   status: 'idle',
   config: null,
-  fileId: null,
-  modifiedTime: null,
   error: null,
   isDirty: false,
 
-  async hydrate(accessToken, folderId) {
+  async hydrate() {
     if (get().status === 'loading') return;
     set({ status: 'loading', error: null });
-    try {
-      const { config, meta } = await loadOrInitBudget(accessToken, folderId);
-      set({
-        config,
-        fileId: meta.id,
-        modifiedTime: meta.modifiedTime,
-        status: 'idle',
-        isDirty: false,
-      });
-    } catch (e) {
+    const res = await apiGet<BudgetConfig>('/api/budget');
+    if (res.ok) {
+      set({ config: res.data, status: 'idle', isDirty: false });
+    } else {
       set({
         status: 'error',
-        error: e instanceof Error ? e.message : String(e),
+        error: `failed to load budget: ${res.error.status}`,
       });
     }
   },
@@ -52,21 +44,21 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
     set({ config: updater(prev), isDirty: true });
   },
 
-  async save(accessToken) {
-    const { config, fileId } = get();
-    if (!config || !fileId) return;
+  async save() {
+    const { config } = get();
+    if (!config) return;
     set({ status: 'saving', error: null });
-    try {
-      const meta = await saveBudget(accessToken, fileId, config);
-      set({
-        modifiedTime: meta.modifiedTime,
-        status: 'idle',
-        isDirty: false,
-      });
-    } catch (e) {
+    const res = await apiFetch<BudgetConfig>('/api/budget', {
+      method: 'PUT',
+      body: config,
+    });
+    if (res.ok) {
+      set({ config: res.data, status: 'idle', isDirty: false });
+    } else {
+      const body = res.error.body as { error?: string; detail?: string } | null;
       set({
         status: 'error',
-        error: e instanceof Error ? e.message : String(e),
+        error: body?.detail ?? body?.error ?? `failed to save budget: ${res.error.status}`,
       });
     }
   },
@@ -75,8 +67,6 @@ export const useBudgetStore = create<BudgetState>((set, get) => ({
     set({
       status: 'idle',
       config: null,
-      fileId: null,
-      modifiedTime: null,
       error: null,
       isDirty: false,
     });

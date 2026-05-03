@@ -4,9 +4,7 @@ import dayjs from 'dayjs';
 import MonthSwitcher from '@/components/MonthSwitcher';
 import PaceBadge from '@/components/PaceBadge';
 import ProgressBar from '@/components/ProgressBar';
-import { useAuthStore } from '@/store/auth';
 import { useBudgetStore } from '@/store/budget';
-import { useFolderStore } from '@/store/folder';
 import { useUiStore } from '@/store/ui';
 import {
   getAnnualBudget,
@@ -26,9 +24,6 @@ import { colorForCategory } from '@/lib/categories';
 import { cn, formatYen, formatPct } from '@/lib/utils';
 
 export default function Budget() {
-  const folder = useFolderStore((s) => s.folder);
-  const accessToken = useAuthStore((s) => s.accessToken);
-  const ensureFreshToken = useAuthStore((s) => s.ensureFreshToken);
   const status = useBudgetStore((s) => s.status);
   const config = useBudgetStore((s) => s.config);
   const error = useBudgetStore((s) => s.error);
@@ -38,32 +33,22 @@ export default function Budget() {
 
   const selectedMonth = useUiStore((s) => s.selectedMonth);
 
-  // フォルダがあればロード
+  // ログイン済みなら D1 から取得
   useEffect(() => {
-    if (!folder || !accessToken || config) return;
-    let cancelled = false;
-    void (async () => {
-      const token = (await ensureFreshToken()) ?? accessToken;
-      if (!token || cancelled) return;
-      await hydrate(token, folder.id);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [folder?.id, accessToken, config, ensureFreshToken, hydrate, folder]);
+    if (config) return;
+    void hydrate();
+  }, [config, hydrate]);
 
   async function onSave() {
-    const token = (await ensureFreshToken()) ?? accessToken;
-    if (!token) return;
-    await save(token);
+    await save();
   }
 
-  if (!folder) {
+  if (status === 'error' && !config) {
     return (
       <div className="space-y-4">
         <Header selectedMonth={selectedMonth} />
-        <div className="card p-8 text-center text-sm text-ink-60">
-          先にダッシュボードでDriveフォルダを選択してください。
+        <div className="card p-8 text-center text-sm text-rose-700">
+          {error ?? '予算データの取得に失敗しました'}
         </div>
       </div>
     );
