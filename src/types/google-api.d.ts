@@ -1,7 +1,7 @@
 // Google APIs (gapi loader, GIS, Picker) の global 宣言を集約する。
 // 個別の型定義は ./gis.ts に切り出している（GIS）か、本ファイル内で完結している（gapi/picker）。
 
-import type { GoogleAccountsOAuth2 } from './gis';
+import type { GoogleAccountsId, GoogleAccountsOAuth2 } from './gis';
 
 declare global {
   interface Window {
@@ -17,6 +17,7 @@ interface GapiNamespace {
 interface GoogleNamespace {
   accounts: {
     oauth2: GoogleAccountsOAuth2;
+    id: GoogleAccountsId;
   };
   picker?: PickerNamespace;
 }

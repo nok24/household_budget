@@ -40,6 +40,7 @@
     "drizzle-orm": "^0.45.2",
     "encoding-japanese": "^2.2.0",
     "hono": "^4.12.16",
+    "jose": "^6.2.3",
     "lucide-react": "^0.460.0",
     "papaparse": "^5.4.1",
     "react": "^18.3.1",
