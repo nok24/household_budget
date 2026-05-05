@@ -50,8 +50,8 @@ export default function TrendBarChart({ data, selectedMonth, height = 180 }: Pro
             borderRadius: 6,
             fontSize: 11,
           }}
-          formatter={(value: number, name: string) => [
-            formatYen(value),
+          formatter={(value, name) => [
+            formatYen(typeof value === 'number' ? value : Number(value) || 0),
             name === 'income' ? '収入' : '支出',
           ]}
           labelFormatter={(label) => label}
