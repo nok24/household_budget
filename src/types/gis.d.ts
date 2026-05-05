@@ -1,5 +1,19 @@
 // Google Identity Services (https://accounts.google.com/gsi/client) の型エクスポート。
-// `window.google` 自体の global 宣言は google-api.d.ts に集約している。
+// `window.google` の global 宣言もここに集約する (旧 google-api.d.ts は PR-G で撤去済)。
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: GoogleAccountsId;
+        oauth2: {
+          initTokenClient(config: TokenClientConfig): TokenClient;
+          revoke(accessToken: string, callback?: () => void): void;
+        };
+      };
+    };
+  }
+}
 
 export interface TokenClientConfig {
   client_id: string;
