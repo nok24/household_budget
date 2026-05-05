@@ -8,6 +8,7 @@ import { transactionsRouter } from '../routes/transactions';
 import { overridesRouter } from '../routes/overrides';
 import { budgetRouter } from '../routes/budget';
 import { assetsRouter } from '../routes/assets';
+import { backupRouter } from '../routes/backup';
 
 // Pages Functions のキャッチオール。`/api/*` の全リクエストを Hono にディスパッチする。
 // 各サブルータは ./routes/ 配下に分割していき、ここに mount する。
@@ -45,6 +46,9 @@ app.route('/api/budget', budgetRouter);
 
 // 資産スナップショット (Phase 3 PR-E)
 app.route('/api/assets', assetsRouter);
+
+// D1 backup (週 1 GitHub Actions cron が Bearer token で叩く)
+app.route('/api/backup', backupRouter);
 
 // 未マッチは 404
 app.notFound((c) => c.json({ error: 'not_found' }, 404));

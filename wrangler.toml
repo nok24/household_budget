@@ -13,11 +13,19 @@ database_name = "household-budget"
 database_id = "809f32e7-7644-4e51-8c41-c3b7acfdebb5" # `wrangler d1 create household-budget` で発行された UUID
 migrations_dir = "functions/db/migrations"
 
+# 週 1 D1 backup を gzip して書き込む R2 bucket。
+# Cloudflare Pages dashboard 側でも同じ binding (Variable name: BACKUPS / R2 bucket:
+# household-budget-backups) を Production Functions に設定する必要がある
+# (wrangler.toml の [[r2_buckets]] は wrangler pages dev のローカル用)。
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "household-budget-backups"
+
 # 環境変数は Cloudflare Pages Settings > Environment variables で本番設定する。
 # ローカル (wrangler pages dev) は `.dev.vars` で上書きされる。
 # ここに [vars] で空文字を宣言すると本番ダッシュボードで「空文字で上書き」になり
 # 削除もできなくなるので、敢えて [vars] 自体を持たない。
 #
 # 本番に設定する Plaintext: GOOGLE_CLIENT_ID / ALLOWED_EMAILS / ADMIN_EMAILS / VITE_GOOGLE_CLIENT_ID
-# 本番に設定する Secret:    GOOGLE_CLIENT_SECRET / DRIVE_TOKEN_AES_KEY
+# 本番に設定する Secret:    GOOGLE_CLIENT_SECRET / DRIVE_TOKEN_AES_KEY / BACKUP_TOKEN
 # 本番には設定しない (dev のみ): IS_DEV, ALLOWED_ORIGINS

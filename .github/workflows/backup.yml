@@ -1,0 +1,38 @@
+name: D1 Backup
+
+# 週 1 で本番 Pages Functions の /api/backup を叩いて、D1 全データテーブルを
+# gzip 済み JSON で R2 bucket (household-budget-backups) に書き込む。
+# Bearer token 認証なので GitHub Secrets に BACKUP_TOKEN が必要。
+#
+# - schedule: 毎週日曜 18:00 UTC = 月曜 03:00 JST
+# - workflow_dispatch: 手動実行も可 (PR マージ後の動作確認 / 必要時のオンデマンド)
+
+on:
+  schedule:
+    - cron: '0 18 * * 0'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    name: Trigger D1 backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call /api/backup
+        env:
+          BACKUP_URL: ${{ vars.BACKUP_URL || 'https://household-budget.pages.dev/api/backup' }}
+          BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BACKUP_TOKEN" ]; then
+            echo "::error::BACKUP_TOKEN secret is not set"
+            exit 1
+          fi
+          # Origin と X-Requested-With は Pages Functions の CSRF middleware を通すため必須。
+          response=$(curl -fsSL -X POST "$BACKUP_URL" \
+            -H "Authorization: Bearer $BACKUP_TOKEN" \
+            -H "X-Requested-With: fetch" \
+            -H "Origin: ${BACKUP_URL%/api/backup}")
+          echo "$response"
+          # ok=true 以外なら fail (curl --fail で 4xx/5xx は既に弾けるが念のため)
+          echo "$response" | grep -q '"ok":true'
