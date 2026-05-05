@@ -192,10 +192,13 @@ refresh token は revoke / 6ヶ月 inactive で失効する。失敗時:
 - D1 マイグレーションは `npm run db:migrate:local` (開発) / `npm run db:migrate:remote` (本番) で手動。本番は PR マージ後に実行
 - `wrangler.toml` で Pages Functions と D1 binding を定義 (詳細は `memory/project_cloudflare_pages_env.md`)
 
-### バックアップ (TODO)
+### バックアップ
 
-- 週1で D1 を JSON ダンプして R2 に保存する Cron Trigger を計画中 (現時点で未実装)。
-- Cloudflare Pages Functions の scheduled handler または別 Worker で実装予定。
+- **週 1** (毎週月曜 03:00 JST) で D1 全データテーブルを JSON にダンプ + gzip して R2 bucket `household-budget-backups` に `backups/YYYY-MM-DD.json.gz` で保存。
+- 仕組み: `POST /api/backup` (`functions/routes/backup.ts`) が `BACKUP_TOKEN` Bearer 認証 + R2 binding `BACKUPS` で書き込む。GitHub Actions cron (`.github/workflows/backup.yml`) が curl で叩く (Pages Functions が Cron Trigger 非対応なので)。
+- 含めるテーブル: users / app_settings / encrypted_secrets / members / category_order / annual_budgets / account_anchors / transactions / overrides / asset_snapshots / csv_files。**含めない**: sessions (TTL で揮発)、sync_log (履歴で復元不要)。
+- 古い backup は R2 dashboard の Object lifecycle rule で 90 日経過時に自動削除 (週 1 backup なので ~13 ファイル維持)。
+- 復元手順 (将来 PR で endpoint 化予定、現状は手動): R2 から `.gz` を pull → `gzip -d` → JSON → 各テーブル `INSERT OR REPLACE` を `wrangler d1 execute --remote` で流す。`encrypted_secrets` の `ciphertext` / `iv` は `Array.from(Uint8Array)` で正規化済みなので、復元時は `new Uint8Array([...])` に戻して BLOB INSERT する。
 
 ---
 

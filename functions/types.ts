@@ -4,6 +4,12 @@
 export interface Env {
   // Cloudflare Bindings
   DB: D1Database;
+  /**
+   * D1 backup 用 R2 bucket。週 1 で `/api/backup` が gzip 済み JSON ダンプを書き込む。
+   * wrangler.toml [[r2_buckets]] と Cloudflare Pages dashboard の R2 binding 両方に
+   * `BACKUPS` という名前で `household-budget-backups` を bind しておくこと。
+   */
+  BACKUPS: R2Bucket;
 
   // 環境変数 (Cloudflare Pages の Environment variables)
   GOOGLE_CLIENT_ID: string;
@@ -29,6 +35,11 @@ export interface Env {
   // Secrets (`wrangler pages secret put` で投入)
   GOOGLE_CLIENT_SECRET: string; // Drive OAuth コールバック用
   DRIVE_TOKEN_AES_KEY: string; // base64 エンコードされた AES-256 鍵
+  /**
+   * `/api/backup` の Bearer token。GitHub Actions cron がこの値で叩く。
+   * `openssl rand -hex 32` で 256bit hex を生成して投入。
+   */
+  BACKUP_TOKEN: string;
 }
 
 /** セッション復元後に Hono context に乗せるユーザ情報 */

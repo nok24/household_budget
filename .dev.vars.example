@@ -9,6 +9,11 @@ ADMIN_EMAILS=nok.24.eva.05@gmail.com
 #   openssl rand -base64 32
 DRIVE_TOKEN_AES_KEY=
 
+# /api/backup を叩く Bearer token。本番は GitHub Secrets と Cloudflare Pages Secret に
+# 同じ値を投入する。dev では curl で動作確認する用に何か入れておく。生成例:
+#   openssl rand -hex 32
+BACKUP_TOKEN=
+
 # dev モード (HTTP で cookie を発行できるよう Secure / __Host- prefix を無効化)
 # 本番では未設定または "false" にする。
 IS_DEV=true

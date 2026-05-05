@@ -44,3 +44,4 @@ pnpm-debug.log*
 *.csv
 budget.json
 overrides.json
+.claude/scheduled_tasks.lock
