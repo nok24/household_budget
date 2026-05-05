@@ -136,7 +136,8 @@ npm run db:migrate:local   # ローカル D1 に migration 適用
 
 # 2 ターミナル並走
 npm run dev                                 # vite (5173)
-npx wrangler pages dev --port 8788 --local  # Pages Functions + ローカル D1
+npx wrangler pages dev --port 8788 --local --r2 BACKUPS=household-budget-backups
+                                            # Pages Functions + ローカル D1 + ローカル R2
 ```
 
 ブラウザは 5173 を開く。vite proxy が `/api` を 8788 に転送する。`.dev.vars` には `OAUTH_REDIRECT_URI=http://localhost:5173/api/admin/drive/callback` と `IS_DEV=true` を入れて、Drive OAuth callback と cookie の `__Host-` prefix を dev 環境に揃える。

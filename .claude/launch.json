@@ -10,7 +10,16 @@
     {
       "name": "wrangler-pages",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["wrangler", "pages", "dev", "--port", "8788", "--local"],
+      "runtimeArgs": [
+        "wrangler",
+        "pages",
+        "dev",
+        "--port",
+        "8788",
+        "--local",
+        "--r2",
+        "BACKUPS=household-budget-backups"
+      ],
       "port": 8788
     }
   ]
