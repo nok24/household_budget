@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import {
   closestCenter,
   DndContext,
@@ -18,7 +17,8 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useBudgetStore } from '@/store/budget';
-import { getDistinctLargeCategoriesApplied } from '@/lib/aggregate';
+import { distinctLargeCategoriesFromArray } from '@/lib/aggregate';
+import { useAppliedTransactions } from '@/lib/queries';
 import { orderCategories } from '@/lib/budget';
 import { colorForCategory } from '@/lib/categories';
 import { cn } from '@/lib/utils';
@@ -31,7 +31,8 @@ export default function CategoryOrderEditor() {
   const error = useBudgetStore((s) => s.error);
   const save = useBudgetStore((s) => s.save);
 
-  const known = useLiveQuery(() => getDistinctLargeCategoriesApplied(), [], []);
+  const { data: applied } = useAppliedTransactions();
+  const known = useMemo(() => distinctLargeCategoriesFromArray(applied), [applied]);
 
   const allCategories = useMemo(() => {
     if (!config) return [];

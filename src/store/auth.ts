@@ -1,12 +1,5 @@
 import { create } from 'zustand';
-import {
-  fetchUserInfo,
-  loadGisScript,
-  parseAllowedEmails,
-  requestIdToken,
-  requestToken,
-  revokeToken,
-} from '@/lib/auth';
+import { loadGisScript, parseAllowedEmails, requestIdToken } from '@/lib/auth';
 import { apiGet, apiPost } from '@/lib/api';
 
 export type AuthStatus =
@@ -37,10 +30,6 @@ interface AuthState {
    */
   serverSession: ServerSession | null;
 
-  // Drive 関連 (Phase 3 で剥がす予定。Phase 1 では並存)
-  accessToken: string | null;
-  expiresAt: number | null; // epoch ms
-
   // 表示用フィールド (serverSession の影。silent 失敗時の email 表示用にも残す)
   email: string | null;
   name: string | null;
@@ -50,7 +39,6 @@ interface AuthState {
   init: () => Promise<void>;
   login: () => Promise<void>;
   silentRefresh: () => Promise<boolean>;
-  ensureFreshToken: () => Promise<string | null>;
   logout: () => Promise<void>;
 }
 
@@ -58,9 +46,7 @@ const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 // フロント側でも一応 allowlist を持つが、本来の信頼境界は Worker 側にある。
 // ここは UI 上のフィードバックを早めに出すための前段チェック。
 const ALLOWED_EMAILS = parseAllowedEmails(import.meta.env.VITE_ALLOWED_EMAILS);
-
-// 5分の余裕を見て期限切れ扱い
-const REFRESH_LEEWAY_MS = 5 * 60 * 1000;
+void ALLOWED_EMAILS; // 旧 client-side allowlist 判定で使っていた。Worker が真実なので未使用化。
 
 // 一度でも明示ログインに成功したらこのフラグを立て、以降のリロードで silent を試す。
 const ONCE_AUTHED_FLAG = 'household.auth.has-been-authed';
@@ -101,11 +87,6 @@ function recallEmail(): string | null {
   } catch {
     return null;
   }
-}
-
-function isAllowedClientSide(email: string): boolean {
-  if (ALLOWED_EMAILS.length === 0) return true; // フロント側は allowlist 未設定なら通す (Worker 側で最終判定)
-  return ALLOWED_EMAILS.includes(email.toLowerCase());
 }
 
 interface MeResponse {
@@ -152,8 +133,6 @@ async function fetchMe(): Promise<MeResponse | null> {
 export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'initializing',
   serverSession: null,
-  accessToken: null,
-  expiresAt: null,
   email: null,
   name: null,
   picture: null,
@@ -228,16 +207,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         picture: session.user.picture,
         error: null,
       });
-
-      // 3) Drive 用 access token も取得 (Phase 1 では並存)
-      try {
-        const token = await requestToken(CLIENT_ID, { loginHint: session.user.email });
-        const expiresAt = Date.now() + token.expires_in * 1000;
-        set({ accessToken: token.access_token, expiresAt });
-      } catch (e) {
-        // Drive 用トークンの失敗ではログイン自体は成功扱いのまま。Phase 2 以降で UI 通知の仕組みを入れる。
-        console.warn('[auth] drive access token request failed', e);
-      }
     } catch (e) {
       const err = e as Error & { kind?: string; email?: string };
       if (err.kind === 'email_not_allowed') {
@@ -245,8 +214,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           status: 'unauthorized',
           serverSession: null,
           email: err.email ?? null,
-          accessToken: null,
-          expiresAt: null,
           error: null,
         });
         return;
@@ -259,7 +226,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   async silentRefresh() {
-    // まずサーバ cookie で復帰を試みる (これが Phase 1 で最重要な経路)。
+    // まずサーバ cookie で復帰を試みる (これが最重要な経路)。
     const me = await fetchMe();
     if (me) {
       markAuthedOnce();
@@ -308,47 +275,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({
         status: 'idle',
         serverSession: null,
-        accessToken: null,
-        expiresAt: null,
       });
       return false;
     }
   },
 
-  async ensureFreshToken() {
-    const { accessToken, expiresAt } = get();
-    if (accessToken && expiresAt && Date.now() < expiresAt - REFRESH_LEEWAY_MS) {
-      return accessToken;
-    }
-    if (!CLIENT_ID) return null;
-    // Drive 用 access token は ID Token とは独立に refresh する。
-    // serverSession が生きていれば user 情報は再取得不要。
-    try {
-      const lastEmail = recallEmail() ?? get().email ?? undefined;
-      const token = await requestToken(CLIENT_ID, { silent: true, loginHint: lastEmail });
-      // 一応 userinfo で email を確認 (allowlist 外ユーザの混入防止)
-      const user = await fetchUserInfo(token.access_token);
-      if (!isAllowedClientSide(user.email)) {
-        await revokeToken(token.access_token);
-        return null;
-      }
-      const expires = Date.now() + token.expires_in * 1000;
-      set({ accessToken: token.access_token, expiresAt: expires });
-      return token.access_token;
-    } catch {
-      return null;
-    }
-  },
-
   async logout() {
-    const { accessToken } = get();
     // 1) Worker のセッションを失効
     await apiPost('/api/auth/logout');
-    // 2) Drive 用 access token を revoke
-    if (accessToken) {
-      await revokeToken(accessToken);
-    }
-    // 3) GIS の auto select も無効化 (次回明示ログインを促す)
+    // 2) GIS の auto select も無効化 (次回明示ログインを促す)
     try {
       window.google?.accounts.id.disableAutoSelect();
     } catch {
@@ -358,8 +293,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({
       status: 'idle',
       serverSession: null,
-      accessToken: null,
-      expiresAt: null,
       email: null,
       name: null,
       picture: null,

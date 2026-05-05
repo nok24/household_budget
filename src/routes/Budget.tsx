@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import dayjs from 'dayjs';
 import MonthSwitcher from '@/components/MonthSwitcher';
 import PaceBadge from '@/components/PaceBadge';
@@ -14,12 +13,13 @@ import {
   orderCategories,
 } from '@/lib/budget';
 import {
-  getCategoryBreakdown,
-  getCategoryBreakdownYTD,
-  getDistinctLargeCategoriesApplied,
+  breakdownCategories,
+  breakdownCategoriesYTD,
+  distinctLargeCategoriesFromArray,
   getYear,
-  getYearToDateSummary,
+  summarizeYearToDate,
 } from '@/lib/aggregate';
+import { useAppliedTransactions } from '@/lib/queries';
 import { colorForCategory } from '@/lib/categories';
 import { cn, formatYen, formatPct } from '@/lib/utils';
 
@@ -125,15 +125,21 @@ function BudgetEditor({ selectedMonth }: { selectedMonth: string }) {
   const config = useBudgetStore((s) => s.config);
   const setConfig = useBudgetStore((s) => s.setConfig);
 
+  const { data: applied } = useAppliedTransactions();
   // 候補カテゴリ: budget の annual + 取引データ由来
-  const knownCategoriesFromTx = useLiveQuery(() => getDistinctLargeCategoriesApplied(), [], []);
-  const breakdown = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
-  const ytdBreakdown = useLiveQuery(
-    () => getCategoryBreakdownYTD(selectedMonth),
-    [selectedMonth],
-    [],
+  const knownCategoriesFromTx = useMemo(() => distinctLargeCategoriesFromArray(applied), [applied]);
+  const breakdown = useMemo(
+    () => breakdownCategories(applied, selectedMonth),
+    [applied, selectedMonth],
   );
-  const ytdSummary = useLiveQuery(() => getYearToDateSummary(selectedMonth), [selectedMonth], null);
+  const ytdBreakdown = useMemo(
+    () => breakdownCategoriesYTD(applied, selectedMonth),
+    [applied, selectedMonth],
+  );
+  const ytdSummary = useMemo(
+    () => summarizeYearToDate(applied, selectedMonth),
+    [applied, selectedMonth],
+  );
 
   const expenseByCategory = useMemo(() => {
     const m = new Map<string, number>();

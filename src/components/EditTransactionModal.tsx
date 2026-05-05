@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
-import type { DbTransaction } from '@/lib/db';
+import type { DbTransaction } from '@/lib/aggregate';
 import {
   useDeleteOverrideMutation,
   useOverrideByMfRowId,

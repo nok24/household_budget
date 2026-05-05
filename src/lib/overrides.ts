@@ -1,4 +1,22 @@
-import { db, type DbOverride, type DbTransaction } from './db';
+import type { DbTransaction } from './aggregate';
+
+/**
+ * 取引上書きの 1 行分。`mergeOverride` / `applyOverrideMap` のキャリア型として使う。
+ *
+ * D1 の真実は `functions/lib/overridesConfig.ts` の `OverrideRecord` (sourceFileId,
+ * mfRowId 複合 PK)。フロントは集計時に「mfRowId 単独」で素早く lookup したいので、
+ * `id = mfRowId` のフラットな形に正規化したものをここで扱う (queries.ts の
+ * `apiOverrideToMerge` で変換)。
+ */
+export interface DbOverride {
+  id: string; // = MF row ID
+  largeCategory?: string;
+  midCategory?: string;
+  memo?: string;
+  isTransferOverride?: boolean;
+  excluded?: boolean;
+  updatedAt: string; // ISO8601
+}
 
 export interface OverrideInput {
   largeCategory?: string;
@@ -6,39 +24,6 @@ export interface OverrideInput {
   memo?: string;
   isTransferOverride?: boolean;
   excluded?: boolean;
-}
-
-export async function getOverride(id: string): Promise<DbOverride | undefined> {
-  return db.overrides.get(id);
-}
-
-export async function getOverridesByIds(ids: string[]): Promise<Map<string, DbOverride>> {
-  if (ids.length === 0) return new Map();
-  const list = await db.overrides.where('id').anyOf(ids).toArray();
-  return new Map(list.map((o) => [o.id, o]));
-}
-
-export async function upsertOverride(id: string, input: OverrideInput): Promise<void> {
-  // 全項目が空（or undefined）なら削除と等価
-  const allEmpty =
-    input.largeCategory === undefined &&
-    input.midCategory === undefined &&
-    input.memo === undefined &&
-    input.isTransferOverride === undefined &&
-    input.excluded === undefined;
-  if (allEmpty) {
-    await db.overrides.delete(id);
-    return;
-  }
-  await db.overrides.put({
-    id,
-    ...input,
-    updatedAt: new Date().toISOString(),
-  });
-}
-
-export async function clearOverride(id: string): Promise<void> {
-  await db.overrides.delete(id);
 }
 
 /**
@@ -56,16 +41,9 @@ export function mergeOverride(t: DbTransaction, ov: DbOverride | undefined): DbT
   };
 }
 
-export async function applyOverridesToRows(rows: DbTransaction[]): Promise<DbTransaction[]> {
-  const map = await getOverridesByIds(rows.map((r) => r.id));
-  if (map.size === 0) return rows;
-  return rows.map((r) => mergeOverride(r, map.get(r.id)));
-}
-
 /**
- * 既に取得済みの override Map を transactions に適用する pure 関数。
- * TanStack Query 経由で取得したサーバ取引と Dexie の overrides を
- * フロントで合成するために使う。
+ * 取得済みの override Map を transactions に適用する pure 関数。
+ * TanStack Query で取得したサーバ取引と D1 真実の overrides を合成するために使う。
  */
 export function applyOverrideMap(
   rows: DbTransaction[],
@@ -73,9 +51,4 @@ export function applyOverrideMap(
 ): DbTransaction[] {
   if (map.size === 0) return rows;
   return rows.map((r) => mergeOverride(r, map.get(r.id)));
-}
-
-export async function hasOverride(id: string): Promise<boolean> {
-  const ov = await db.overrides.get(id);
-  return !!ov;
 }

@@ -1,6 +1,26 @@
 import dayjs from 'dayjs';
-import { db, type DbTransaction } from './db';
-import { applyOverridesToRows } from './overrides';
+
+/**
+ * 取引 1 行分。Worker 側 `ApiTransaction` から `surrogateId` を除いた最小フィールド。
+ *
+ * 旧 `src/lib/db.ts` (Dexie) の `DbTransaction` をここに移し、TanStack Query 経由で
+ * 取れた取引行 + override 適用済み配列のキャリア型として再利用する。型名は互換のため
+ * `DbTransaction` のまま維持。
+ */
+export interface DbTransaction {
+  id: string; // MF row ID (一意)
+  sourceFileId: string;
+  date: string; // YYYY-MM-DD
+  yearMonth: string; // YYYY-MM
+  amount: number;
+  contentName: string;
+  account: string;
+  largeCategory: string;
+  midCategory: string;
+  memo: string;
+  isTarget: boolean;
+  isTransfer: boolean;
+}
 
 export interface MonthSummary {
   yearMonth: string;
@@ -27,16 +47,6 @@ export function isIncome(t: DbTransaction): boolean {
 export function shouldCount(t: DbTransaction): boolean {
   return t.isTarget && !t.isTransfer;
 }
-
-async function loadMonth(yearMonth: string): Promise<DbTransaction[]> {
-  const raw = await db.transactions.where('yearMonth').equals(yearMonth).toArray();
-  return applyOverridesToRows(raw);
-}
-
-// ─────────────────────────────────────────────────────────────
-// Pure 版 (引数で applied 取引配列を受ける、TanStack Query 経由のフロント用)
-// 既存の async 関数 (db.transactions / overrides を読む) はレガシーページ用に残す。
-// ─────────────────────────────────────────────────────────────
 
 export function summarizeMonth(applied: DbTransaction[], yearMonth: string): MonthSummary {
   let income = 0;
@@ -125,183 +135,43 @@ export function listAvailableMonths(applied: DbTransaction[]): string[] {
   return [...set].sort();
 }
 
-export async function getMonthSummary(yearMonth: string): Promise<MonthSummary> {
-  const rows = await loadMonth(yearMonth);
-  let income = 0;
-  let expense = 0;
-  let count = 0;
-  for (const t of rows) {
-    if (!shouldCount(t)) continue;
-    if (t.amount >= 0) income += t.amount;
-    else expense += -t.amount;
-    count += 1;
-  }
-  return { yearMonth, income, expense, balance: income - expense, count };
-}
-
-export function shiftMonth(yearMonth: string, delta: number): string {
-  return dayjs(`${yearMonth}-01`).add(delta, 'month').format('YYYY-MM');
-}
-
-export async function getMonthlyTrend(
-  anchorYearMonth: string,
-  monthsBack: number,
-): Promise<MonthSummary[]> {
-  const months: string[] = [];
-  for (let i = monthsBack - 1; i >= 0; i--) {
-    months.push(shiftMonth(anchorYearMonth, -i));
-  }
-  return Promise.all(months.map((m) => getMonthSummary(m)));
-}
-
-/** YYYY-MM から年（YYYY）を取り出す */
-export function getYear(yearMonth: string): string {
-  return yearMonth.slice(0, 4);
-}
-
-/** その年の 1月から指定月までの月リストを返す */
-function listYtdMonths(yearMonth: string): string[] {
-  const year = getYear(yearMonth);
-  const months: string[] = [];
-  let cur = `${year}-01`;
-  while (cur <= yearMonth) {
-    months.push(cur);
-    cur = shiftMonth(cur, 1);
-  }
-  return months;
-}
-
 /**
- * その年の1月〜selectedMonth までの累計サマリ（年初来 / Year-To-Date）。
- * 集計ルールは getMonthSummary と同じ（isTarget && !isTransfer のみ）。
+ * 指定カテゴリの月別支出 (直近 monthsBack ヶ月)。
  */
-export async function getYearToDateSummary(yearMonth: string): Promise<MonthSummary> {
-  const months = listYtdMonths(yearMonth);
-  const summaries = await Promise.all(months.map((m) => getMonthSummary(m)));
-  let income = 0;
-  let expense = 0;
-  let count = 0;
-  for (const s of summaries) {
-    income += s.income;
-    expense += s.expense;
-    count += s.count;
-  }
-  return { yearMonth, income, expense, balance: income - expense, count };
-}
-
-/**
- * その年の1月〜selectedMonth までのカテゴリ別累計支出。
- */
-export async function getCategoryBreakdownYTD(yearMonth: string): Promise<CategoryAgg[]> {
-  const months = listYtdMonths(yearMonth);
-  const perMonth = await Promise.all(months.map((m) => getCategoryBreakdown(m)));
-  const map = new Map<string, CategoryAgg>();
-  for (const list of perMonth) {
-    for (const c of list) {
-      const v = map.get(c.name) ?? { name: c.name, amount: 0, count: 0 };
-      v.amount += c.amount;
-      v.count += c.count;
-      map.set(c.name, v);
-    }
-  }
-  return [...map.values()].sort((a, b) => b.amount - a.amount);
-}
-
-export async function getCategoryBreakdown(yearMonth: string): Promise<CategoryAgg[]> {
-  const rows = await loadMonth(yearMonth);
-  const map = new Map<string, CategoryAgg>();
-  for (const t of rows) {
-    if (!isExpense(t)) continue;
-    const key = t.largeCategory || '未分類';
-    const v = map.get(key) ?? { name: key, amount: 0, count: 0 };
-    v.amount += -t.amount;
-    v.count += 1;
-    map.set(key, v);
-  }
-  return [...map.values()].sort((a, b) => b.amount - a.amount);
-}
-
-export async function getRecentTransactionsForMonth(
-  yearMonth: string,
-  limit: number,
-): Promise<DbTransaction[]> {
-  const rows = await loadMonth(yearMonth);
-  // 集計と表示を一致させるため、計算対象=1 かつ 振替=0 の行のみを表示
-  const filtered = rows.filter(shouldCount);
-  filtered.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  return filtered.slice(0, limit);
-}
-
-export async function getAvailableMonths(): Promise<string[]> {
-  const set = new Set<string>();
-  await db.transactions.each((t) => {
-    if (t.yearMonth) set.add(t.yearMonth);
-  });
-  return [...set].sort();
-}
-
-export async function getAllTransactionsApplied(): Promise<DbTransaction[]> {
-  const raw = await db.transactions.toArray();
-  return applyOverridesToRows(raw);
-}
-
-export async function getDistinctLargeCategoriesApplied(): Promise<string[]> {
-  const rows = await getAllTransactionsApplied();
-  const set = new Set<string>();
-  for (const r of rows) set.add(r.largeCategory || '未分類');
-  return [...set].sort();
-}
-
-export async function getDistinctAccounts(): Promise<{ name: string; count: number }[]> {
-  const map = new Map<string, number>();
-  await db.transactions.each((t) => {
-    if (!t.account) return;
-    map.set(t.account, (map.get(t.account) ?? 0) + 1);
-  });
-  return [...map.entries()]
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count);
-}
-
-/**
- * 指定カテゴリの月別支出（直近 monthsBack ヶ月）。
- */
-export async function getCategoryMonthlyTrend(
+export function categoryMonthlyTrend(
+  applied: DbTransaction[],
   category: string,
   anchorYearMonth: string,
   monthsBack: number,
-): Promise<{ yearMonth: string; amount: number }[]> {
+): { yearMonth: string; amount: number }[] {
   const months: string[] = [];
   for (let i = monthsBack - 1; i >= 0; i--) {
     months.push(shiftMonth(anchorYearMonth, -i));
   }
-  const results = await Promise.all(
-    months.map(async (ym) => {
-      const rows = await loadMonth(ym);
-      let total = 0;
-      for (const t of rows) {
-        if (!isExpense(t)) continue;
-        const key = t.largeCategory || '未分類';
-        if (key !== category) continue;
-        total += -t.amount;
-      }
-      return { yearMonth: ym, amount: total };
-    }),
-  );
-  return results;
+  const sums = new Map<string, number>();
+  for (const m of months) sums.set(m, 0);
+  for (const t of applied) {
+    if (!isExpense(t)) continue;
+    const key = t.largeCategory || '未分類';
+    if (key !== category) continue;
+    if (!sums.has(t.yearMonth)) continue;
+    sums.set(t.yearMonth, (sums.get(t.yearMonth) ?? 0) + -t.amount);
+  }
+  return months.map((ym) => ({ yearMonth: ym, amount: sums.get(ym) ?? 0 }));
 }
 
 /**
- * 指定カテゴリの店舗別（contentName）支出 TOP N。
+ * 指定カテゴリの店舗別 (contentName) 支出 TOP N。
  */
-export async function getStoreTopForCategory(
+export function storeTopForCategory(
+  applied: DbTransaction[],
   yearMonth: string,
   category: string,
   topN: number,
-): Promise<{ name: string; amount: number; count: number }[]> {
-  const rows = await loadMonth(yearMonth);
+): { name: string; amount: number; count: number }[] {
   const map = new Map<string, { name: string; amount: number; count: number }>();
-  for (const t of rows) {
+  for (const t of applied) {
+    if (t.yearMonth !== yearMonth) continue;
     if (!isExpense(t)) continue;
     const key = t.largeCategory || '未分類';
     if (key !== category) continue;
@@ -323,14 +193,15 @@ export async function getStoreTopForCategory(
 /**
  * 指定カテゴリの曜日別 平均支出。
  */
-export async function getDayOfWeekAverageForCategory(
+export function dayOfWeekAverageForCategory(
+  applied: DbTransaction[],
   yearMonth: string,
   category: string,
-): Promise<{ dow: number; label: string; average: number }[]> {
-  const rows = await loadMonth(yearMonth);
+): { dow: number; label: string; average: number }[] {
   const sums: number[] = [0, 0, 0, 0, 0, 0, 0];
   const counts: number[] = [0, 0, 0, 0, 0, 0, 0];
-  for (const t of rows) {
+  for (const t of applied) {
+    if (t.yearMonth !== yearMonth) continue;
     if (!isExpense(t)) continue;
     const key = t.largeCategory || '未分類';
     if (key !== category) continue;
@@ -345,4 +216,50 @@ export async function getDayOfWeekAverageForCategory(
     label,
     average: counts[dow] > 0 ? sums[dow] / counts[dow] : 0,
   }));
+}
+
+/**
+ * 全取引行から重複除去した口座名 + 件数。
+ */
+export function distinctAccountsFromArray(
+  applied: DbTransaction[],
+): { name: string; count: number }[] {
+  const map = new Map<string, number>();
+  for (const t of applied) {
+    if (!t.account) continue;
+    map.set(t.account, (map.get(t.account) ?? 0) + 1);
+  }
+  return [...map.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/**
+ * 全取引行から重複除去した大項目。
+ */
+export function distinctLargeCategoriesFromArray(applied: DbTransaction[]): string[] {
+  const set = new Set<string>();
+  for (const r of applied) set.add(r.largeCategory || '未分類');
+  return [...set].sort();
+}
+
+export function shiftMonth(yearMonth: string, delta: number): string {
+  return dayjs(`${yearMonth}-01`).add(delta, 'month').format('YYYY-MM');
+}
+
+/** YYYY-MM から年（YYYY）を取り出す */
+export function getYear(yearMonth: string): string {
+  return yearMonth.slice(0, 4);
+}
+
+/** その年の 1月から指定月までの月リスト */
+function listYtdMonths(yearMonth: string): string[] {
+  const year = getYear(yearMonth);
+  const months: string[] = [];
+  let cur = `${year}-01`;
+  while (cur <= yearMonth) {
+    months.push(cur);
+    cur = shiftMonth(cur, 1);
+  }
+  return months;
 }

@@ -464,7 +464,7 @@ function BudgetUsageCard({
   applied,
   selectedMonth,
 }: {
-  applied: import('@/lib/db').DbTransaction[];
+  applied: import('@/lib/aggregate').DbTransaction[];
   selectedMonth: string;
 }) {
   const config = useBudgetStore((s) => s.config);

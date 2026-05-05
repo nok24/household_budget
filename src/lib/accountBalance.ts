@@ -1,7 +1,5 @@
 import dayjs from 'dayjs';
-import { db, type DbTransaction } from './db';
-import { applyOverridesToRows } from './overrides';
-import { shiftMonth } from './aggregate';
+import { type DbTransaction, shiftMonth } from './aggregate';
 import type { AccountAnchor } from '@/types';
 
 // 機関別残高の推定。MFの資産推移CSVは機関ごとの内訳を含まないため、
@@ -23,16 +21,6 @@ export interface MonthlyBalance {
 function matchesPattern(account: string, pattern: string): boolean {
   if (!pattern) return false;
   return account.includes(pattern);
-}
-
-/**
- * 指定パターンにマッチする取引のみを返す。振替も加減算したいので isTransfer / isTarget は無視。
- * 上書き（overrides）の振替フラグも反映するために applyOverridesToRows を通す。
- */
-async function loadAccountTransactions(pattern: string): Promise<DbTransaction[]> {
-  const all = await db.transactions.toArray();
-  const applied = await applyOverridesToRows(all);
-  return applied.filter((t) => matchesPattern(t.account, pattern));
 }
 
 function sumAmountInRange(
@@ -134,26 +122,4 @@ export function computeMonthlyBalancesFromArray(
     balance: balanceByMonth.get(ym) ?? 0,
     flow: monthlyFlow.get(ym) ?? 0,
   }));
-}
-
-/**
- * Dexie 経由のレガシー版 (旧 ページ用)。中身は computeMonthlyBalancesFromArray を使う。
- */
-export async function computeMonthlyBalances(anchor: AccountAnchor): Promise<MonthlyBalance[]> {
-  if (!anchor.pattern || !anchor.asOfDate) return [];
-  const rows = await loadAccountTransactions(anchor.pattern);
-  // pattern フィルタは loadAccountTransactions 側で実施済みなので、空 anchor pattern を渡しても OK だが
-  // FromArray は再度 pattern でフィルタする (重複しても結果は同じ)。簡潔のためそのまま渡す。
-  return computeMonthlyBalancesFromArray(rows, anchor);
-}
-
-/**
- * 指定月のアンカー口座残高（推定）を返す。データが無ければ null。
- */
-export async function getAccountBalanceForMonth(
-  anchor: AccountAnchor,
-  yearMonth: string,
-): Promise<MonthlyBalance | null> {
-  const series = await computeMonthlyBalances(anchor);
-  return series.find((s) => s.yearMonth === yearMonth) ?? null;
 }

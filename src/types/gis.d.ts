@@ -1,47 +1,23 @@
 // Google Identity Services (https://accounts.google.com/gsi/client) の型エクスポート。
-// `window.google` 自体の global 宣言は google-api.d.ts に集約している。
+// `window.google` の global 宣言もここに集約する (旧 google-api.d.ts は PR-G で撤去済)。
 
-export interface TokenClientConfig {
-  client_id: string;
-  scope: string;
-  callback: ((response: TokenResponse) => void) | '';
-  error_callback?: (error: TokenError) => void;
-  prompt?: '' | 'none' | 'consent' | 'select_account';
-  hint?: string;
-}
-
-export interface TokenClient {
-  callback: ((response: TokenResponse) => void) | '';
-  requestAccessToken(overrides?: {
-    prompt?: '' | 'none' | 'consent' | 'select_account';
-    hint?: string;
-  }): void;
-}
-
-export interface TokenResponse {
-  access_token: string;
-  expires_in: number; // seconds
-  scope: string;
-  token_type: 'Bearer';
-  error?: string;
-  error_description?: string;
-  hd?: string;
-}
-
-export interface TokenError {
-  type: 'popup_closed' | 'popup_failed_to_open' | 'unknown';
-  message?: string;
-}
-
-export interface GoogleAccountsOAuth2 {
-  initTokenClient(config: TokenClientConfig): TokenClient;
-  hasGrantedAllScopes(token: TokenResponse, ...scopes: string[]): boolean;
-  revoke(accessToken: string, done?: () => void): void;
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: GoogleAccountsId;
+      };
+    };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
 // Google Identity Services - Sign-In (ID Token) API
 // https://developers.google.com/identity/gsi/web/reference/js-reference
+//
+// Drive アクセス用 OAuth2 token client (`google.accounts.oauth2`) の型定義は
+// PR-G で削除済み。Drive アクセスは Worker 側 (admin が refresh_token を D1 に
+// 暗号化保存) が代理する。
 // ─────────────────────────────────────────────────────────────
 
 export interface IdConfiguration {
