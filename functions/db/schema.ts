@@ -1,4 +1,12 @@
-import { sqliteTable, text, integer, blob, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  sqliteTable,
+  text,
+  integer,
+  blob,
+  index,
+  uniqueIndex,
+  primaryKey,
+} from 'drizzle-orm/sqlite-core';
 
 // 家計簿アプリの D1 スキーマ。
 // docs/ARCHITECTURE.md §3 を正本とし、変更時は両方更新すること。
@@ -82,22 +90,37 @@ export const transactions = sqliteTable(
   }),
 );
 
-export const overrides = sqliteTable('overrides', {
-  /** 対応する transactions.id を主キーに兼ねる */
-  transactionId: integer('transaction_id')
-    .primaryKey()
-    .references(() => transactions.id),
-  largeCategory: text('large_category'),
-  midCategory: text('mid_category'),
-  memo: text('memo'),
-  /** null の場合は元の振替フラグを尊重 */
-  isTransferOverride: integer('is_transfer_override'),
-  /** 1 の場合は集計から除外 (isTarget=0 相当) */
-  excluded: integer('excluded'),
-  /** 監査用: 誰が触ったか */
-  updatedBy: text('updated_by').references(() => users.id),
-  updatedAt: integer('updated_at').notNull(),
-});
+/**
+ * 取引上書き。
+ *
+ * PK は `(source_file_id, mf_row_id)` 複合キー。surrogate `transactions.id` の FK は意図的に
+ * 持たない: 取引同期 (`POST /api/sync/transactions`) は source_file_id 単位で DELETE+INSERT
+ * を行うため surrogate id が変わる。CSV 側の MF Row ID は安定しているので、複合キーで
+ * 紐付けると再取込でも override が孤立しない。
+ *
+ * orphan ファイル削除時のみ overrides も連動削除する (sync.ts の deleteFileTransactions
+ * の includeOverrides フラグ参照)。
+ */
+export const overrides = sqliteTable(
+  'overrides',
+  {
+    sourceFileId: text('source_file_id').notNull(),
+    mfRowId: text('mf_row_id').notNull(),
+    largeCategory: text('large_category'),
+    midCategory: text('mid_category'),
+    memo: text('memo'),
+    /** null の場合は元の振替フラグを尊重 */
+    isTransferOverride: integer('is_transfer_override'),
+    /** 1 の場合は集計から除外 (isTarget=0 相当) */
+    excluded: integer('excluded'),
+    /** 監査用: 誰が触ったか */
+    updatedBy: text('updated_by').references(() => users.id),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.sourceFileId, t.mfRowId] }),
+  }),
+);
 
 // ─────────────────────────────────────────────────────────────
 // 家計設定 (members / カテゴリ並び順 / 年間予算 / 口座アンカー)

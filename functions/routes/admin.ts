@@ -25,6 +25,11 @@ import {
   listFolderChildren,
 } from '../lib/driveClient';
 import { hasBudgetData, validateBudgetConfig, writeBudgetConfig } from '../lib/budgetConfig';
+import {
+  hasOverridesData,
+  migrateDriveOverrides,
+  validateDriveOverridesFile,
+} from '../lib/overridesConfig';
 
 export const adminRouter = new Hono<AppBindings>();
 
@@ -260,6 +265,110 @@ adminRouter.post('/migrate/budget', async (c) => {
 
   await writeBudgetConfig(db, parsed);
   return c.json({ ok: true, dryRun: false, summary });
+});
+
+// ─────────────────────────────────────────────────────────────
+// overrides.json (旧 frontend Drive Picker 経路) → D1 への移行
+// ─────────────────────────────────────────────────────────────
+
+interface MigrateOverridesBody {
+  /** dryRun=true: 何件読み込むかのプレビューだけ返して D1 を変更しない */
+  dryRun?: boolean;
+  /** force=true: D1 に既にデータがあっても上書きする */
+  force?: boolean;
+}
+
+adminRouter.post('/migrate/overrides', async (c) => {
+  const body = ((await c.req.json().catch(() => ({}))) ?? {}) as MigrateOverridesBody;
+  const dryRun = body.dryRun === true;
+  const force = body.force === true;
+
+  const db = getDb(c.env);
+  const folderId = await getSetting(db, SETTING_KEYS.BUDGET_FOLDER_ID);
+  if (!folderId) {
+    return c.json({ error: 'budget_folder_not_set' }, 400);
+  }
+
+  let fileMeta;
+  try {
+    fileMeta = await findFileByNameInFolder(db, c.env, folderId, 'overrides.json');
+  } catch (e) {
+    if (e instanceof DriveNotConnectedError) {
+      return c.json({ error: 'drive_not_connected' }, 409);
+    }
+    if (e instanceof DriveApiError) {
+      return c.json({ error: 'drive_api_error', status: e.status }, 502);
+    }
+    throw e;
+  }
+
+  // overrides.json が無い = 移行不要として ok を返す (404 ではなく)。
+  if (!fileMeta) {
+    const alreadyHasData = await hasOverridesData(db);
+    return c.json({
+      ok: true,
+      dryRun,
+      summary: { total: 0, migrated: 0, skipped: 0, ambiguous: 0, sourceFile: null },
+      alreadyHasData,
+    });
+  }
+
+  let parsed;
+  try {
+    const buf = await downloadFileBytes(db, c.env, fileMeta.id);
+    const text = new TextDecoder().decode(buf);
+    const json = JSON.parse(text);
+    parsed = validateDriveOverridesFile(json);
+  } catch (e) {
+    return c.json(
+      { error: 'parse_failed', detail: e instanceof Error ? e.message : 'unknown' },
+      422,
+    );
+  }
+
+  const sourceFile = { id: fileMeta.id, name: fileMeta.name, modifiedTime: fileMeta.modifiedTime };
+
+  if (dryRun) {
+    const alreadyHasData = await hasOverridesData(db);
+    return c.json({
+      ok: true,
+      dryRun: true,
+      summary: {
+        total: Object.keys(parsed.byTxId).length,
+        migrated: 0,
+        skipped: 0,
+        ambiguous: 0,
+        sourceFile,
+      },
+      alreadyHasData,
+    });
+  }
+
+  if (!force) {
+    const alreadyHasData = await hasOverridesData(db);
+    if (alreadyHasData) {
+      return c.json(
+        {
+          error: 'already_migrated',
+          summary: {
+            total: Object.keys(parsed.byTxId).length,
+            migrated: 0,
+            skipped: 0,
+            ambiguous: 0,
+            sourceFile,
+          },
+        },
+        409,
+      );
+    }
+  }
+
+  const counts = await migrateDriveOverrides(db, parsed, c.var.user.id);
+  return c.json({
+    ok: true,
+    dryRun: false,
+    summary: { ...counts, sourceFile },
+  });
 });
 
 adminRouter.put('/settings', async (c) => {

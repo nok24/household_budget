@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import dayjs from 'dayjs';
 import type { DbTransaction } from '@/lib/db';
 import {
-  clearOverride,
-  getOverride,
-  upsertOverride,
-  type OverrideInput,
-} from '@/lib/overrides';
-import { useAuthStore } from '@/store/auth';
-import { useOverridesStore } from '@/store/overrides';
+  useDeleteOverrideMutation,
+  useOverrideByMfRowId,
+  useUpsertOverrideMutation,
+  type OverrideUpsertInput,
+} from '@/lib/queries';
 import { cn, formatYen } from '@/lib/utils';
 
 interface Props {
@@ -25,22 +22,19 @@ export default function EditTransactionModal({
   open,
   onClose,
 }: Props) {
-  const existing = useLiveQuery(
-    () => (open ? getOverride(rawTransaction.id) : Promise.resolve(undefined)),
-    [open, rawTransaction.id],
-    undefined,
-  );
+  const existing = useOverrideByMfRowId(open ? rawTransaction.id : null);
 
   const [largeCategory, setLargeCategory] = useState('');
   const [midCategory, setMidCategory] = useState('');
   const [memo, setMemo] = useState('');
-  const [transferOverride, setTransferOverride] = useState<'auto' | 'force-transfer' | 'force-not-transfer'>('auto');
+  const [transferOverride, setTransferOverride] = useState<
+    'auto' | 'force-transfer' | 'force-not-transfer'
+  >('auto');
   const [excluded, setExcluded] = useState(false);
-  const [busy, setBusy] = useState(false);
 
-  const accessToken = useAuthStore((s) => s.accessToken);
-  const ensureFreshToken = useAuthStore((s) => s.ensureFreshToken);
-  const schedulePush = useOverridesStore((s) => s.schedulePush);
+  const upsertMutation = useUpsertOverrideMutation();
+  const deleteMutation = useDeleteOverrideMutation();
+  const busy = upsertMutation.isPending || deleteMutation.isPending;
 
   // モーダルが開いたとき or override 取得完了時に状態を初期化
   useEffect(() => {
@@ -50,7 +44,7 @@ export default function EditTransactionModal({
       setMidCategory(existing.midCategory ?? '');
       setMemo(existing.memo ?? '');
       setTransferOverride(
-        existing.isTransferOverride === undefined
+        existing.isTransferOverride === null
           ? 'auto'
           : existing.isTransferOverride
             ? 'force-transfer'
@@ -78,40 +72,54 @@ export default function EditTransactionModal({
 
   if (!open) return null;
 
-  async function scheduleDriveSync() {
-    const t = (await ensureFreshToken()) ?? accessToken;
-    if (t) schedulePush(t);
-  }
-
   async function onSave() {
-    setBusy(true);
+    const input: OverrideUpsertInput = {
+      sourceFileId: rawTransaction.sourceFileId,
+      mfRowId: rawTransaction.id,
+      largeCategory: largeCategory.trim() === '' ? null : largeCategory.trim(),
+      midCategory: midCategory.trim() === '' ? null : midCategory.trim(),
+      memo: memo === '' ? null : memo,
+      isTransferOverride:
+        transferOverride === 'auto' ? null : transferOverride === 'force-transfer',
+      excluded: excluded ? true : null,
+    };
+    // 全フィールドが null なら upsert ではなく delete
+    const allNull =
+      input.largeCategory === null &&
+      input.midCategory === null &&
+      input.memo === null &&
+      input.isTransferOverride === null &&
+      input.excluded === null;
     try {
-      const input: OverrideInput = {
-        largeCategory: largeCategory.trim() === '' ? undefined : largeCategory.trim(),
-        midCategory: midCategory.trim() === '' ? undefined : midCategory.trim(),
-        memo: memo === '' ? undefined : memo,
-        isTransferOverride:
-          transferOverride === 'auto'
-            ? undefined
-            : transferOverride === 'force-transfer',
-        excluded: excluded ? true : undefined,
-      };
-      await upsertOverride(rawTransaction.id, input);
-      void scheduleDriveSync();
+      if (allNull) {
+        if (existing) {
+          await deleteMutation.mutateAsync({
+            sourceFileId: existing.sourceFileId,
+            mfRowId: existing.mfRowId,
+          });
+        }
+      } else {
+        await upsertMutation.mutateAsync(input);
+      }
       onClose();
-    } finally {
-      setBusy(false);
+    } catch (e) {
+      console.error('[EditTransactionModal] save failed', e);
     }
   }
 
   async function onResetOverride() {
-    setBusy(true);
-    try {
-      await clearOverride(rawTransaction.id);
-      void scheduleDriveSync();
+    if (!existing) {
       onClose();
-    } finally {
-      setBusy(false);
+      return;
+    }
+    try {
+      await deleteMutation.mutateAsync({
+        sourceFileId: existing.sourceFileId,
+        mfRowId: existing.mfRowId,
+      });
+      onClose();
+    } catch (e) {
+      console.error('[EditTransactionModal] reset failed', e);
     }
   }
 
@@ -120,19 +128,18 @@ export default function EditTransactionModal({
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/30"
       onClick={onClose}
     >
-      <div
-        className="card max-w-md w-full p-6 space-y-4"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="card max-w-md w-full p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
         <header className="flex items-start justify-between gap-3">
           <div>
             <div className="text-[11px] tracking-wider text-ink-40">取引の上書き</div>
             <div className="text-sm text-ink-60 mt-0.5 tabular-nums">
               {dayjs(rawTransaction.date).format('YYYY/MM/DD')} ·{' '}
-              <span className={cn(
-                'font-medium',
-                rawTransaction.amount >= 0 ? 'text-accent' : 'text-ink',
-              )}>
+              <span
+                className={cn(
+                  'font-medium',
+                  rawTransaction.amount >= 0 ? 'text-accent' : 'text-ink',
+                )}
+              >
                 {rawTransaction.amount >= 0 ? '+' : '−'}
                 {formatYen(Math.abs(rawTransaction.amount))}
               </span>
@@ -142,11 +149,7 @@ export default function EditTransactionModal({
               {rawTransaction.account} · 元の大項目: {rawTransaction.largeCategory || '—'}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-ink-40 hover:text-ink p-1 -m-1"
-          >
+          <button type="button" onClick={onClose} className="text-ink-40 hover:text-ink p-1 -m-1">
             ×
           </button>
         </header>
@@ -237,9 +240,8 @@ export default function EditTransactionModal({
         </footer>
 
         <p className="text-[10px] text-ink-40 leading-relaxed">
-          保存後、ローカルに即時反映され、数秒後に Drive 上の{' '}
-          <code className="font-numeric">overrides.json</code> に書き戻されます。
-          家族の端末では次回起動時に同期されます。{' '}
+          保存すると D1 (サーバ)
+          に即時反映され、家族の端末でも次回画面更新時に同じ上書きが見えます。
           {transaction !== rawTransaction && '（このカードに表示中の値は既に上書き反映済み）'}
         </p>
       </div>

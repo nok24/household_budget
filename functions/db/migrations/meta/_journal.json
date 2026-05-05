@@ -8,6 +8,13 @@
       "when": 1777784217019,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1778976000000,
+      "tag": "0001_overrides_composite_key",
+      "breakpoints": true
     }
   ]
 }

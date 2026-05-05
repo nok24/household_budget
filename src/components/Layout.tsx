@@ -5,10 +5,10 @@ import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
 import { useBudgetStore } from '@/store/budget';
 import { useFolderStore } from '@/store/folder';
-import { useOverridesStore } from '@/store/overrides';
 import { useSyncStore } from '@/store/sync';
 import { getLastSyncedAt } from '@/lib/sync';
 import { syncAssetFolder } from '@/lib/assetSync';
+import { useOverridesQuery } from '@/lib/queries';
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'ダッシュボード' },
@@ -21,14 +21,15 @@ const NAV_ITEMS = [
 
 export default function Layout() {
   const hydrate = useSyncStore((s) => s.hydrate);
-  const folder = useFolderStore((s) => s.folder);
   const assetFolder = useFolderStore((s) => s.assetFolder);
   const accessToken = useAuthStore((s) => s.accessToken);
   const ensureFreshToken = useAuthStore((s) => s.ensureFreshToken);
   const budgetConfig = useBudgetStore((s) => s.config);
   const hydrateBudget = useBudgetStore((s) => s.hydrate);
-  const overridesHydrated = useOverridesStore((s) => s.hydrated);
-  const hydrateOverrides = useOverridesStore((s) => s.hydrate);
+
+  // overrides は D1 真実 + Dexie ミラー (PR-G で Dexie 廃止予定)。
+  // useOverridesQuery が走るだけで TanStack Query → Dexie ミラーが自動同期される。
+  useOverridesQuery();
 
   // ログイン後の初回マウントで IndexedDB から最終同期時刻を復元
   useEffect(() => {
@@ -47,19 +48,6 @@ export default function Layout() {
     if (budgetConfig) return;
     void hydrateBudget();
   }, [budgetConfig, hydrateBudget]);
-
-  // フォルダがあれば overrides.json を Drive から同期
-  useEffect(() => {
-    if (!folder || !accessToken || overridesHydrated) return;
-    let cancelled = false;
-    void (async () => {
-      const t = (await ensureFreshToken()) ?? accessToken;
-      if (!cancelled && t) await hydrateOverrides(t, folder.id);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [folder, accessToken, overridesHydrated, ensureFreshToken, hydrateOverrides]);
 
   // 資産フォルダ（任意）が設定されていて、まだローカルに何も無いときだけ初回自動同期。
   // 2回目以降や差分取り込みは、資産CSVが小さく取り込みコストが軽いので mount のたびに走らせる。

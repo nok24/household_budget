@@ -74,6 +74,27 @@ interface MigrateBudgetRunResponse {
   summary: MigrateBudgetSummary;
 }
 
+interface MigrateOverridesSummary {
+  total: number;
+  migrated: number;
+  skipped: number;
+  ambiguous: number;
+  sourceFile: { id: string; name: string; modifiedTime: string } | null;
+}
+
+interface MigrateOverridesDryRunResponse {
+  ok: true;
+  dryRun: true;
+  summary: MigrateOverridesSummary;
+  alreadyHasData: boolean;
+}
+
+interface MigrateOverridesRunResponse {
+  ok: true;
+  dryRun: false;
+  summary: MigrateOverridesSummary;
+}
+
 const SETTING_KEYS = {
   BUDGET_FOLDER_ID: 'budget_folder_id',
   BUDGET_FOLDER_NAME: 'budget_folder_name',
@@ -108,6 +129,9 @@ export default function AdminPanel() {
   const [syncAssetsBusy, setSyncAssetsBusy] = useState(false);
   const [migrateBusy, setMigrateBusy] = useState(false);
   const [migrateDryRun, setMigrateDryRun] = useState<MigrateBudgetDryRunResponse | null>(null);
+  const [migrateOverridesBusy, setMigrateOverridesBusy] = useState(false);
+  const [migrateOverridesDryRun, setMigrateOverridesDryRun] =
+    useState<MigrateOverridesDryRunResponse | null>(null);
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
 
   const driveQuery = searchParams.get('drive');
@@ -310,6 +334,50 @@ export default function AdminPanel() {
     setMigrateBusy(false);
   };
 
+  const onMigrateOverrides = async (mode: 'dry-run' | 'run' | 'force') => {
+    setMigrateOverridesBusy(true);
+    setMessage(null);
+    const res = await apiFetch<MigrateOverridesDryRunResponse | MigrateOverridesRunResponse>(
+      '/api/admin/migrate/overrides',
+      {
+        method: 'POST',
+        body: mode === 'dry-run' ? { dryRun: true } : mode === 'force' ? { force: true } : {},
+      },
+    );
+    if (res.ok) {
+      const s = res.data.summary;
+      if (res.data.dryRun) {
+        setMigrateOverridesDryRun(res.data);
+        const ambiguousNote = s.ambiguous > 0 ? ` (重複 ${s.ambiguous} 件は最新ファイル採用)` : '';
+        setMessage({
+          kind: 'success',
+          text: `dry-run 完了: 移行候補 ${s.total} 件${ambiguousNote}${res.data.alreadyHasData ? ' (D1 に既存 override あり、上書きには「強制実行」が必要)' : ''}`,
+        });
+      } else {
+        setMigrateOverridesDryRun(null);
+        const ambiguousNote = s.ambiguous > 0 ? ` (重複 ${s.ambiguous})` : '';
+        setMessage({
+          kind: 'success',
+          text: `override 移行完了: ${s.migrated} 件取込 / ${s.skipped} 件 skip${ambiguousNote}`,
+        });
+      }
+    } else {
+      const body = res.error.body as { error?: string; detail?: string } | null;
+      const msg =
+        body?.error === 'budget_folder_not_set'
+          ? '家計簿フォルダが未設定です'
+          : body?.error === 'already_migrated'
+            ? 'D1 に既存の override あり。上書きするには「強制実行」を選択してください'
+            : body?.error === 'parse_failed'
+              ? `overrides.json のパースに失敗: ${body.detail ?? ''}`
+              : body?.error === 'drive_not_connected'
+                ? 'Drive 未接続です'
+                : '移行に失敗しました';
+      setMessage({ kind: 'error', text: msg });
+    }
+    setMigrateOverridesBusy(false);
+  };
+
   const onClearFolder = async (kind: FolderKind) => {
     if (!window.confirm(`${kind === 'budget' ? '家計簿' : '資産'}フォルダの設定を解除しますか？`)) {
       return;
@@ -459,6 +527,64 @@ export default function AdminPanel() {
                     }
                   }}
                   disabled={migrateBusy}
+                  className="text-xs font-medium px-3 py-1.5 rounded-md border border-rose-700 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                >
+                  強制実行
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2 pt-3 border-t border-line">
+            <div className="text-xs font-medium tracking-wider text-ink-70">
+              旧 overrides.json から D1 へ移行
+            </div>
+            <div className="text-[11px] text-ink-40 leading-relaxed">
+              旧 frontend Drive 経路で書いていた取引上書き (overrides.json) を D1 に取り込みます。
+              家計簿フォルダ直下の overrides.json を読みます。事前に取引同期を済ませておくこと
+              (mfRowId → sourceFileId の解決に使います)。
+            </div>
+            {migrateOverridesDryRun && (
+              <div className="text-[11px] text-ink-60 bg-canvas px-2 py-1.5 rounded border border-line">
+                プレビュー: 移行候補 {migrateOverridesDryRun.summary.total} 件
+                {migrateOverridesDryRun.summary.ambiguous > 0 && (
+                  <> · 重複 {migrateOverridesDryRun.summary.ambiguous} 件 (最新採用)</>
+                )}
+                {migrateOverridesDryRun.alreadyHasData && (
+                  <span className="text-rose-700"> · D1 に既存 override あり</span>
+                )}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void onMigrateOverrides('dry-run')}
+                disabled={migrateOverridesBusy || !budgetFolderId}
+                className="text-xs font-medium px-3 py-1.5 rounded-md border border-line hover:bg-canvas disabled:opacity-50"
+              >
+                {migrateOverridesBusy ? '実行中…' : 'プレビュー (dry-run)'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void onMigrateOverrides('run')}
+                disabled={migrateOverridesBusy || !budgetFolderId}
+                className="text-xs font-medium px-3 py-1.5 rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-50"
+              >
+                取り込み実行
+              </button>
+              {migrateOverridesDryRun?.alreadyHasData && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        'D1 の既存 override を overrides.json で上書きします。よろしいですか？',
+                      )
+                    ) {
+                      void onMigrateOverrides('force');
+                    }
+                  }}
+                  disabled={migrateOverridesBusy}
                   className="text-xs font-medium px-3 py-1.5 rounded-md border border-rose-700 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
                 >
                   強制実行

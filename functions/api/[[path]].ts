@@ -5,6 +5,7 @@ import { authRouter, meRouter } from '../routes/auth';
 import { adminRouter } from '../routes/admin';
 import { syncRouter } from '../routes/sync';
 import { transactionsRouter } from '../routes/transactions';
+import { overridesRouter } from '../routes/overrides';
 import { budgetRouter } from '../routes/budget';
 import { assetsRouter } from '../routes/assets';
 
@@ -35,6 +36,9 @@ app.route('/api/admin', adminRouter);
 // 同期 / 取引読み取り (Phase 3 PR-B)
 app.route('/api/sync', syncRouter);
 app.route('/api/transactions', transactionsRouter);
+
+// 取引上書き (Phase 3 PR-F)
+app.route('/api/overrides', overridesRouter);
 
 // 予算設定 (Phase 3 PR-D): members / categoryOrder / annual / anchors / settings
 app.route('/api/budget', budgetRouter);

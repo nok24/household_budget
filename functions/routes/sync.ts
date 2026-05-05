@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { AppBindings } from '../types';
 import { requireAuth } from '../lib/authMiddleware';
 import { getDb, type Database } from '../lib/db';
@@ -161,13 +161,13 @@ async function syncTransactions(
     }
   }
 
-  // 4. orphan files (Drive から消えた): transactions と overrides を削除
+  // 4. orphan files (Drive から消えた): transactions と overrides を連動削除
   const remoteIds = new Set(remoteFiles.map((r) => r.id));
   const orphanFileIds = localFiles
     .filter((l) => !remoteIds.has(l.driveFileId))
     .map((l) => l.driveFileId);
   for (const orphanId of orphanFileIds) {
-    await deleteFileTransactions(db, orphanId);
+    await deleteFileTransactions(db, orphanId, true);
     await db.delete(csvFiles).where(eq(csvFiles.driveFileId, orphanId));
   }
 
@@ -189,9 +189,9 @@ async function ingestSingleCsv(
   const rows = decodeAndParseTransactionsCsv(buf);
 
   // このファイル由来の transactions を一旦全消し → 一括挿入。
-  // overrides は (source_file_id, mf_row_id) のコンボで再リンクできるように後段で処理する案もあるが、
-  // overrides は Phase 4 まで本格運用しないので Phase 3 PR-B 段階では shapelock 簡易運用とする。
-  await deleteFileTransactions(db, file.id);
+  // overrides は (source_file_id, mf_row_id) 複合 PK なので CSV 再取込でも再リンクされる。
+  // 同じ source_file_id で再 ingest される通常パスでは overrides を消さない。
+  await deleteFileTransactions(db, file.id, false);
 
   if (rows.length > 0) {
     const records = rows.map((r) => ({
@@ -236,23 +236,18 @@ async function ingestSingleCsv(
 
 /**
  * 指定 source_file_id 配下の transactions を削除する。
- * overrides は FK が ON DELETE CASCADE 無しなので、先に消してからにする。
+ *
+ * overrides は (source_file_id, mf_row_id) 複合 PK なので、同じ sourceFileId で再 ingest される
+ * 通常パスでは保持して再リンクさせる (`includeOverrides=false`)。
+ * Drive から消えた orphan ファイルの掃除では override も連動削除する (`includeOverrides=true`)。
  */
-async function deleteFileTransactions(db: Database, sourceFileId: string): Promise<void> {
-  // 該当 transactions の id を取る
-  const ids = await db
-    .select({ id: transactions.id })
-    .from(transactions)
-    .where(eq(transactions.sourceFileId, sourceFileId));
-  if (ids.length > 0) {
-    const idValues = ids.map((r) => r.id);
-    // overrides を chunk で削除 (IN リスト過大対策)
-    const CHUNK = 200;
-    for (let i = 0; i < idValues.length; i += CHUNK) {
-      await db
-        .delete(overrides)
-        .where(inArray(overrides.transactionId, idValues.slice(i, i + CHUNK)));
-    }
+async function deleteFileTransactions(
+  db: Database,
+  sourceFileId: string,
+  includeOverrides: boolean,
+): Promise<void> {
+  if (includeOverrides) {
+    await db.delete(overrides).where(eq(overrides.sourceFileId, sourceFileId));
   }
   await db.delete(transactions).where(eq(transactions.sourceFileId, sourceFileId));
 }
