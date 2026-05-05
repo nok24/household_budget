@@ -81,8 +81,8 @@ export default function AuthGate({ children }: AuthGateProps) {
           <>
             <h1 className="text-xl font-semibold leading-tight">ログイン</h1>
             <p className="text-sm text-ink-70 leading-relaxed">
-              家族のGoogleアカウントでログインしてください。
-              マネーフォワードのCSVが置かれているDriveフォルダを次の画面で選びます。
+              家族のGoogleアカウントでログインしてください。 CSV の取り込みは admin
+              がサーバ側で一度だけ Drive 接続を済ませる方式です。
             </p>
             <button
               type="button"
@@ -93,8 +93,10 @@ export default function AuthGate({ children }: AuthGateProps) {
               {status === 'authenticating' ? 'ログイン中…' : 'Googleでログイン'}
             </button>
             <p className="text-[11px] text-ink-40 leading-relaxed pt-2 border-t border-line">
-              スコープ: <code className="font-numeric">drive.readonly</code> （CSV読み取り） +{' '}
-              <code className="font-numeric">drive.file</code> （設定ファイル書き込み）。
+              スコープ: <code className="font-numeric">openid</code> +{' '}
+              <code className="font-numeric">email</code> +{' '}
+              <code className="font-numeric">profile</code>。Drive
+              権限はクライアントには付与しません。
             </p>
           </>
         )}
