@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useBudgetStore } from '@/store/budget';
-import { getDistinctAccounts } from '@/lib/aggregate';
+import { distinctAccountsFromArray } from '@/lib/aggregate';
+import { useAppliedTransactions } from '@/lib/queries';
 import { inferMemberId, MEMBER_PRESET_COLORS, newMember } from '@/lib/members';
 import { cn } from '@/lib/utils';
 import type { MemberDef } from '@/types';
@@ -14,7 +14,8 @@ export default function MemberEditor() {
   const error = useBudgetStore((s) => s.error);
   const save = useBudgetStore((s) => s.save);
 
-  const accounts = useLiveQuery(() => getDistinctAccounts(), [], []);
+  const { data: applied } = useAppliedTransactions();
+  const accounts = useMemo(() => distinctAccountsFromArray(applied), [applied]);
 
   const accountAssignments = useMemo(() => {
     if (!config) return new Map<string, string | null>();

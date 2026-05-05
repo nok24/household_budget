@@ -1,5 +1,9 @@
 import dayjs from 'dayjs';
 import { db, type DbTransaction } from './db';
+
+// Step 5 で `db.ts` を撤去する際に `DbTransaction` をここに移動する予定。
+// それまでは re-export して caller が `@/lib/aggregate` から型を取れるようにしておく。
+export type { DbTransaction };
 import { applyOverridesToRows } from './overrides';
 
 export interface MonthSummary {

@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import dayjs from 'dayjs';
 import MonthSwitcher from '@/components/MonthSwitcher';
 import CategoryDonut from '@/components/charts/CategoryDonut';
@@ -7,13 +6,15 @@ import Sparkline from '@/components/charts/Sparkline';
 import { useBudgetStore } from '@/store/budget';
 import { useUiStore } from '@/store/ui';
 import {
-  getCategoryBreakdown,
-  getCategoryBreakdownYTD,
-  getCategoryMonthlyTrend,
-  getDayOfWeekAverageForCategory,
-  getMonthSummary,
-  getStoreTopForCategory,
+  breakdownCategories,
+  breakdownCategoriesYTD,
+  categoryMonthlyTrend,
+  dayOfWeekAverageForCategory,
+  storeTopForCategory,
+  summarizeMonth,
+  type DbTransaction,
 } from '@/lib/aggregate';
+import { useAppliedTransactions } from '@/lib/queries';
 import { getAnnualBudget, getExpectedPaceAtMonth, judgePace } from '@/lib/budget';
 import PaceBadge from '@/components/PaceBadge';
 import { colorForCategory } from '@/lib/categories';
@@ -21,8 +22,12 @@ import { cn, formatYen, formatPct } from '@/lib/utils';
 
 export default function Categories() {
   const selectedMonth = useUiStore((s) => s.selectedMonth);
-  const breakdown = useLiveQuery(() => getCategoryBreakdown(selectedMonth), [selectedMonth], []);
-  const summary = useLiveQuery(() => getMonthSummary(selectedMonth), [selectedMonth], null);
+  const { data: applied } = useAppliedTransactions();
+  const breakdown = useMemo(
+    () => breakdownCategories(applied, selectedMonth),
+    [applied, selectedMonth],
+  );
+  const summary = useMemo(() => summarizeMonth(applied, selectedMonth), [applied, selectedMonth]);
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const activeCategory = selectedCategory ?? breakdown[0]?.name ?? null;
@@ -41,13 +46,14 @@ export default function Categories() {
 
       {/* 上段: 大ドーナツ + 推移テーブル */}
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
-        <DonutCard breakdown={breakdown} totalExpense={summary?.expense ?? 0} />
+        <DonutCard breakdown={breakdown} totalExpense={summary.expense} />
         <CategoryTable
           breakdown={breakdown}
-          totalExpense={summary?.expense ?? 0}
+          totalExpense={summary.expense}
           activeCategory={activeCategory}
           onSelect={setSelectedCategory}
           selectedMonth={selectedMonth}
+          applied={applied}
         />
       </div>
 
@@ -55,9 +61,10 @@ export default function Categories() {
       {activeCategory && (
         <CategoryDetail
           category={activeCategory}
-          totalExpense={summary?.expense ?? 0}
+          totalExpense={summary.expense}
           selectedMonth={selectedMonth}
           breakdown={breakdown}
+          applied={applied}
         />
       )}
     </div>
@@ -98,18 +105,19 @@ function CategoryTable({
   activeCategory,
   onSelect,
   selectedMonth,
+  applied,
 }: {
   breakdown: { name: string; amount: number; count: number }[];
   totalExpense: number;
   activeCategory: string | null;
   onSelect: (c: string) => void;
   selectedMonth: string;
+  applied: DbTransaction[];
 }) {
   const config = useBudgetStore((s) => s.config);
-  const ytdBreakdown = useLiveQuery(
-    () => getCategoryBreakdownYTD(selectedMonth),
-    [selectedMonth],
-    [],
+  const ytdBreakdown = useMemo(
+    () => breakdownCategoriesYTD(applied, selectedMonth),
+    [applied, selectedMonth],
   );
   const ytdByCategory = useMemo(() => {
     const m = new Map<string, number>();
@@ -146,6 +154,7 @@ function CategoryTable({
               isActive={c.name === activeCategory}
               onClick={() => onSelect(c.name)}
               selectedMonth={selectedMonth}
+              applied={applied}
             />
           ))
       )}
@@ -162,6 +171,7 @@ function CategoryRow({
   isActive,
   onClick,
   selectedMonth,
+  applied,
 }: {
   category: string;
   amount: number;
@@ -171,11 +181,11 @@ function CategoryRow({
   isActive: boolean;
   onClick: () => void;
   selectedMonth: string;
+  applied: DbTransaction[];
 }) {
-  const trend = useLiveQuery(
-    () => getCategoryMonthlyTrend(category, selectedMonth, 12),
-    [category, selectedMonth],
-    [],
+  const trend = useMemo(
+    () => categoryMonthlyTrend(applied, category, selectedMonth, 12),
+    [applied, category, selectedMonth],
   );
   const sparkData = trend.map((t) => t.amount);
   const occupancy = totalExpense > 0 ? (amount / totalExpense) * 100 : 0;
@@ -242,26 +252,25 @@ function CategoryDetail({
   totalExpense,
   selectedMonth,
   breakdown,
+  applied,
 }: {
   category: string;
   totalExpense: number;
   selectedMonth: string;
   breakdown: { name: string; amount: number; count: number }[];
+  applied: DbTransaction[];
 }) {
-  const stores = useLiveQuery(
-    () => getStoreTopForCategory(selectedMonth, category, 5),
-    [selectedMonth, category],
-    [],
+  const stores = useMemo(
+    () => storeTopForCategory(applied, selectedMonth, category, 5),
+    [applied, selectedMonth, category],
   );
-  const dowAverage = useLiveQuery(
-    () => getDayOfWeekAverageForCategory(selectedMonth, category),
-    [selectedMonth, category],
-    [],
+  const dowAverage = useMemo(
+    () => dayOfWeekAverageForCategory(applied, selectedMonth, category),
+    [applied, selectedMonth, category],
   );
-  const trend = useLiveQuery(
-    () => getCategoryMonthlyTrend(category, selectedMonth, 12),
-    [category, selectedMonth],
-    [],
+  const trend = useMemo(
+    () => categoryMonthlyTrend(applied, category, selectedMonth, 12),
+    [applied, category, selectedMonth],
   );
 
   const catAmount = useMemo(
