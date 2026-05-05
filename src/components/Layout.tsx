@@ -4,11 +4,7 @@ import dayjs from 'dayjs';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
 import { useBudgetStore } from '@/store/budget';
-import { useFolderStore } from '@/store/folder';
-import { useSyncStore } from '@/store/sync';
-import { getLastSyncedAt } from '@/lib/sync';
-import { syncAssetFolder } from '@/lib/assetSync';
-import { useOverridesQuery } from '@/lib/queries';
+import { useOverridesQuery, useSyncStatus } from '@/lib/queries';
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'ダッシュボード' },
@@ -20,54 +16,18 @@ const NAV_ITEMS = [
 ];
 
 export default function Layout() {
-  const hydrate = useSyncStore((s) => s.hydrate);
-  const assetFolder = useFolderStore((s) => s.assetFolder);
-  const accessToken = useAuthStore((s) => s.accessToken);
-  const ensureFreshToken = useAuthStore((s) => s.ensureFreshToken);
   const budgetConfig = useBudgetStore((s) => s.config);
   const hydrateBudget = useBudgetStore((s) => s.hydrate);
 
-  // overrides は D1 真実 + Dexie ミラー (PR-G で Dexie 廃止予定)。
-  // useOverridesQuery が走るだけで TanStack Query → Dexie ミラーが自動同期される。
+  // overrides は D1 真実。Layout から 1 回 fetch しておけば各ページの useAppliedTransactions
+  // / useOverrideByMfRowId は dedup されたキャッシュを共有する。
   useOverridesQuery();
-
-  // ログイン後の初回マウントで IndexedDB から最終同期時刻を復元
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const last = await getLastSyncedAt();
-      if (!cancelled) hydrate(last);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [hydrate]);
 
   // 認証済み (= cookie が効いている) なら D1 から budget config を先読み
   useEffect(() => {
     if (budgetConfig) return;
     void hydrateBudget();
   }, [budgetConfig, hydrateBudget]);
-
-  // 資産フォルダ（任意）が設定されていて、まだローカルに何も無いときだけ初回自動同期。
-  // 2回目以降や差分取り込みは、資産CSVが小さく取り込みコストが軽いので mount のたびに走らせる。
-  useEffect(() => {
-    if (!assetFolder || !accessToken) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const t = (await ensureFreshToken()) ?? accessToken;
-        if (!t || cancelled) return;
-        await syncAssetFolder(t, assetFolder.id);
-      } catch (e) {
-        console.error('[asset-sync] failed', e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assetFolder?.id, accessToken]);
 
   return (
     <div className="min-h-screen grid grid-cols-[200px_1fr] max-md:grid-cols-1">
@@ -126,25 +86,19 @@ function MembersSummary() {
 }
 
 function SyncStatus() {
-  const status = useSyncStore((s) => s.status);
-  const lastSyncedAt = useSyncStore((s) => s.lastSyncedAt);
-  const folder = useFolderStore((s) => s.folder);
+  const { data } = useSyncStatus();
+  const lastSyncedAt = data?.lastSyncedAt ?? null;
+  const running = data?.lastLog?.status === 'running';
+  const errored = data?.lastLog?.status === 'error';
 
-  if (!folder) {
-    return (
-      <div className="text-[10px] leading-relaxed">
-        <div className="tracking-[0.08em] text-ink-40">SYNC</div>
-        <div className="mt-1 text-ink-40">未接続</div>
-      </div>
-    );
-  }
   return (
     <div className="text-[10px] leading-relaxed">
       <div className="tracking-[0.08em] text-ink-40">最終更新</div>
       <div className="mt-1 text-ink-60 tabular-nums">
-        {status === 'syncing' && '同期中…'}
-        {status === 'error' && <span className="text-rose-700">エラー</span>}
-        {status === 'idle' &&
+        {running && '同期中…'}
+        {!running && errored && <span className="text-rose-700">エラー</span>}
+        {!running &&
+          !errored &&
           (lastSyncedAt ? dayjs(lastSyncedAt).format('YYYY/MM/DD HH:mm') : '未同期')}
       </div>
     </div>
