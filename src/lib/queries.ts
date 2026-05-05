@@ -1,9 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { apiFetch, apiGet, apiPost } from './api';
-import { db, type DbOverride, type DbTransaction } from './db';
-import { applyOverrideMap } from './overrides';
+import { type DbTransaction } from './aggregate';
+import { applyOverrideMap, type DbOverride } from './overrides';
 
 /**
  * Worker から返ってくる取引行。`functions/routes/transactions.ts` の serializer と一致させること。
@@ -46,8 +45,10 @@ export function useAllTransactions() {
 }
 
 /**
- * API 取得した取引に Dexie の overrides を適用したものを返す。
- * overrides は Phase 4 で D1 に移すまで Dexie 管理のままなのでここで合成する。
+ * API 取得した取引に D1 真実の overrides を適用したものを返す。
+ *
+ * transactions と overrides は staleTime / invalidate 周期が違うので
+ * `useAllTransactions` と `useOverridesQuery` を別 query として保持。
  *
  * `DbTransaction` 型に統一して返すことで、既存の集計ロジックがそのまま使える。
  */
@@ -57,10 +58,12 @@ export function useAppliedTransactions(): {
   isError: boolean;
 } {
   const txQuery = useAllTransactions();
-  const overridesArr = useLiveQuery(() => db.overrides.toArray(), []);
+  const ovQuery = useOverridesQuery();
   const data = useMemo(() => {
     if (!txQuery.data) return [];
-    const overrideMap = new Map((overridesArr ?? []).map((o) => [o.id, o]));
+    const overrideMap = new Map(
+      (ovQuery.data ?? []).map((o): [string, DbOverride] => [o.mfRowId, apiOverrideToMerge(o)]),
+    );
     // ApiTransaction → DbTransaction (id は MF row ID で互換)
     const rows: DbTransaction[] = txQuery.data.map((t) => ({
       id: t.id,
@@ -77,12 +80,12 @@ export function useAppliedTransactions(): {
       isTransfer: t.isTransfer,
     }));
     return applyOverrideMap(rows, overrideMap);
-  }, [txQuery.data, overridesArr]);
+  }, [txQuery.data, ovQuery.data]);
 
   return {
     data,
-    isLoading: txQuery.isLoading,
-    isError: txQuery.isError,
+    isLoading: txQuery.isLoading || ovQuery.isLoading,
+    isError: txQuery.isError || ovQuery.isError,
   };
 }
 
@@ -240,14 +243,12 @@ export interface OverrideKey {
 }
 
 /**
- * D1 から override 全件を取得し、Dexie に全置換でミラーする。
- *
- * `useAppliedTransactions` / `getMonthSummary` 等 既存集計が `db.overrides` を
- * `useLiveQuery` で読んでいるため、PR-G で Dexie 廃止までこのミラーを維持する。
- * Dexie ID は旧 `DbOverride.id = mfRowId` 互換のまま (mfRowId 単独)。
+ * D1 から override 全件を取得する。同 query key の useQuery は dedupe されるので
+ * 各 caller (Layout / useAppliedTransactions / useOverrideByMfRowId 等) から
+ * 自由に呼んで OK。
  */
 export function useOverridesQuery() {
-  const query = useQuery({
+  return useQuery({
     queryKey: ['overrides'],
     queryFn: async () => {
       const res = await apiGet<OverridesResponse>('/api/overrides');
@@ -256,41 +257,15 @@ export function useOverridesQuery() {
     },
     staleTime: 60 * 1000,
   });
-
-  useEffect(() => {
-    if (!query.data) return;
-    const apiRows = query.data;
-    void (async () => {
-      const dexieRows: DbOverride[] = apiRows.map((o) => toDbOverride(o));
-      await db.transaction('rw', db.overrides, async () => {
-        await db.overrides.clear();
-        if (dexieRows.length > 0) {
-          await db.overrides.bulkPut(dexieRows);
-        }
-      });
-    })();
-  }, [query.data]);
-
-  return query;
 }
 
-/** mfRowId 単独で override を引く。新フックの利用先 (EditTransactionModal) 用。 */
+/** mfRowId 単独で override を引く。EditTransactionModal 用。 */
 export function useOverrideByMfRowId(mfRowId: string | null | undefined): ApiOverride | undefined {
-  const overrides = useOverridesCache();
+  const { data } = useOverridesQuery();
   return useMemo(() => {
     if (!mfRowId) return undefined;
-    return overrides?.find((o) => o.mfRowId === mfRowId);
-  }, [mfRowId, overrides]);
-}
-
-function useOverridesCache(): ApiOverride[] | undefined {
-  // useQuery のキャッシュをそのまま参照したいだけなので useQuery を再呼び出し (重複 fetch にはならない)
-  const q = useQuery<ApiOverride[]>({
-    queryKey: ['overrides'],
-    enabled: false, // fetch しない (上の useOverridesQuery が走っている前提)
-    staleTime: 60 * 1000,
-  });
-  return q.data;
+    return data?.find((o) => o.mfRowId === mfRowId);
+  }, [mfRowId, data]);
 }
 
 export function useUpsertOverrideMutation() {
@@ -333,10 +308,11 @@ export function useDeleteOverrideMutation() {
   });
 }
 
-function toDbOverride(o: ApiOverride): DbOverride {
-  // Dexie 側の DbOverride は旧 schema (id = mfRowId, optional フィールド)。
-  // null → undefined に正規化して既存の mergeOverride / applyOverrideMap が
-  // 「未設定」として扱えるようにする。
+/**
+ * `ApiOverride` を `mergeOverride` / `applyOverrideMap` (既存 pure 関数) が
+ * 受け付ける `DbOverride` 形に変換。null → undefined に正規化する。
+ */
+function apiOverrideToMerge(o: ApiOverride): DbOverride {
   const base: DbOverride = {
     id: o.mfRowId,
     updatedAt: new Date(o.updatedAt).toISOString(),

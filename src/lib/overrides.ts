@@ -1,5 +1,9 @@
 import { db, type DbOverride, type DbTransaction } from './db';
 
+// Step 5 で `db.ts` を撤去する際に `DbOverride` 型をここに移動する予定。
+// それまでは re-export して caller (queries.ts 等) が `@/lib/overrides` から取れるように。
+export type { DbOverride };
+
 export interface OverrideInput {
   largeCategory?: string;
   midCategory?: string;
