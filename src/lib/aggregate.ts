@@ -125,6 +125,116 @@ export function listAvailableMonths(applied: DbTransaction[]): string[] {
   return [...set].sort();
 }
 
+/**
+ * 指定カテゴリの月別支出 (直近 monthsBack ヶ月)。
+ * `getCategoryMonthlyTrend` (Dexie 版) の pure 代替。
+ */
+export function categoryMonthlyTrend(
+  applied: DbTransaction[],
+  category: string,
+  anchorYearMonth: string,
+  monthsBack: number,
+): { yearMonth: string; amount: number }[] {
+  const months: string[] = [];
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    months.push(shiftMonth(anchorYearMonth, -i));
+  }
+  // yearMonth で先 bucket
+  const sums = new Map<string, number>();
+  for (const m of months) sums.set(m, 0);
+  for (const t of applied) {
+    if (!isExpense(t)) continue;
+    const key = t.largeCategory || '未分類';
+    if (key !== category) continue;
+    if (!sums.has(t.yearMonth)) continue;
+    sums.set(t.yearMonth, (sums.get(t.yearMonth) ?? 0) + -t.amount);
+  }
+  return months.map((ym) => ({ yearMonth: ym, amount: sums.get(ym) ?? 0 }));
+}
+
+/**
+ * 指定カテゴリの店舗別 (contentName) 支出 TOP N。pure 版。
+ */
+export function storeTopForCategory(
+  applied: DbTransaction[],
+  yearMonth: string,
+  category: string,
+  topN: number,
+): { name: string; amount: number; count: number }[] {
+  const map = new Map<string, { name: string; amount: number; count: number }>();
+  for (const t of applied) {
+    if (t.yearMonth !== yearMonth) continue;
+    if (!isExpense(t)) continue;
+    const key = t.largeCategory || '未分類';
+    if (key !== category) continue;
+    const name = t.contentName || '(不明)';
+    const v = map.get(name) ?? { name, amount: 0, count: 0 };
+    v.amount += -t.amount;
+    v.count += 1;
+    map.set(name, v);
+  }
+  const sorted = [...map.values()].sort((a, b) => b.amount - a.amount);
+  if (sorted.length <= topN) return sorted;
+  const top = sorted.slice(0, topN - 1);
+  const rest = sorted.slice(topN - 1);
+  const restAmount = rest.reduce((s, r) => s + r.amount, 0);
+  const restCount = rest.reduce((s, r) => s + r.count, 0);
+  return [...top, { name: `その他（${rest.length}件）`, amount: restAmount, count: restCount }];
+}
+
+/**
+ * 指定カテゴリの曜日別 平均支出。pure 版。
+ */
+export function dayOfWeekAverageForCategory(
+  applied: DbTransaction[],
+  yearMonth: string,
+  category: string,
+): { dow: number; label: string; average: number }[] {
+  const sums: number[] = [0, 0, 0, 0, 0, 0, 0];
+  const counts: number[] = [0, 0, 0, 0, 0, 0, 0];
+  for (const t of applied) {
+    if (t.yearMonth !== yearMonth) continue;
+    if (!isExpense(t)) continue;
+    const key = t.largeCategory || '未分類';
+    if (key !== category) continue;
+    if (!t.date) continue;
+    const dow = dayjs(t.date).day();
+    sums[dow] += -t.amount;
+    counts[dow] += 1;
+  }
+  const labels = ['日', '月', '火', '水', '木', '金', '土'];
+  return labels.map((label, dow) => ({
+    dow,
+    label,
+    average: counts[dow] > 0 ? sums[dow] / counts[dow] : 0,
+  }));
+}
+
+/**
+ * 全取引行から重複除去した口座名 + 件数。pure 版。
+ */
+export function distinctAccountsFromArray(
+  applied: DbTransaction[],
+): { name: string; count: number }[] {
+  const map = new Map<string, number>();
+  for (const t of applied) {
+    if (!t.account) continue;
+    map.set(t.account, (map.get(t.account) ?? 0) + 1);
+  }
+  return [...map.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/**
+ * 全取引行から重複除去した大項目。pure 版。
+ */
+export function distinctLargeCategoriesFromArray(applied: DbTransaction[]): string[] {
+  const set = new Set<string>();
+  for (const r of applied) set.add(r.largeCategory || '未分類');
+  return [...set].sort();
+}
+
 export async function getMonthSummary(yearMonth: string): Promise<MonthSummary> {
   const rows = await loadMonth(yearMonth);
   let income = 0;
