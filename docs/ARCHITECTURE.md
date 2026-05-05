@@ -71,25 +71,26 @@
 
 `functions/db/schema.ts` (drizzle) で定義。主要テーブル:
 
-| テーブル            | 役割                                                                       |
-| ------------------- | -------------------------------------------------------------------------- |
-| `users`             | Google sub をPK、email allowlist 経由で作成                                |
-| `sessions`          | セッションID (256bit hex)、90日 TTL、HttpOnly cookie で配布                |
-| `app_settings`      | フォルダID、最終同期時刻などのKV                                           |
-| `encrypted_secrets` | Drive refresh token (AES-GCM)。`app_settings` と分離                       |
-| `transactions`      | MF CSV 取り込み後の取引。surrogate id + (source_file_id, mf_row_id) UNIQUE |
-| `overrides`         | 取引上書き (大項目/中項目/メモ/振替/集計除外)。`updated_by` で監査         |
-| `members`           | 世帯メンバー定義                                                           |
-| `category_order`    | カテゴリ並び順                                                             |
-| `annual_budgets`    | カテゴリごとの年間予算                                                     |
-| `account_anchors`   | 機関別残高アンカー                                                         |
-| `asset_snapshots`   | 資産推移CSV由来の月末スナップショット                                      |
-| `csv_files`         | Drive 上の CSV ファイルメタ (差分同期用)                                   |
-| `sync_log`          | 同期実行履歴。`status='running'` を重複実行ロックに兼用                    |
+| テーブル            | 役割                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------ |
+| `users`             | Google sub をPK、email allowlist 経由で作成                                          |
+| `sessions`          | セッションID (256bit hex)、90日 TTL、HttpOnly cookie で配布                          |
+| `app_settings`      | フォルダID、最終同期時刻などのKV                                                     |
+| `encrypted_secrets` | Drive refresh token (AES-GCM)。`app_settings` と分離                                 |
+| `transactions`      | MF CSV 取り込み後の取引。surrogate id + (source_file_id, mf_row_id) UNIQUE           |
+| `overrides`         | 取引上書き (大項目/中項目/メモ/振替/集計除外)。`(source_file_id, mf_row_id)` 複合 PK |
+| `members`           | 世帯メンバー定義                                                                     |
+| `category_order`    | カテゴリ並び順                                                                       |
+| `annual_budgets`    | カテゴリごとの年間予算                                                               |
+| `account_anchors`   | 機関別残高アンカー                                                                   |
+| `asset_snapshots`   | 資産推移CSV由来の月末スナップショット                                                |
+| `csv_files`         | Drive 上の CSV ファイルメタ (差分同期用)                                             |
+| `sync_log`          | 同期実行履歴。`status='running'` を重複実行ロックに兼用                              |
 
 ### 3.2 設計上のポイント
 
 - **`transactions.id` は内部 surrogate**: MF の `id` 列は `mf_row_id` に分離。MF 側で再エクスポートして同じ ID が異なる行に振られても衝突しない
+- **`overrides` の PK は `(source_file_id, mf_row_id)` 複合キー**: surrogate `transactions.id` を FK にすると、取引同期 (`source_file_id` 単位の DELETE+INSERT) で id が変わるたび override が孤立する。CSV 側の `mf_row_id` は安定しているのでこれと合わせて再リンクできる構造にした (PR-F)
 - **`overrides.updated_by`**: 家族2人が触れるので、誰が変えたか監査用に持つ
 - **`encrypted_secrets` を `app_settings` と分離**: 秘匿情報は別テーブルに隔離して、admin 操作の権限境界を明確にする
 
@@ -208,19 +209,20 @@ refresh token は revoke / 6ヶ月 inactive で失効する。失敗時:
 
 ## 9. 既存データからの移行
 
-`POST /api/admin/migrate/dry-run` と `POST /api/admin/migrate/run` を提供:
+admin 専用エンドポイントで Drive の旧 JSON ファイルを D1 に取り込む:
 
-1. Drive 上の `budget.json` (複数あれば最新更新日時) を読む
-2. `members` / `category_order` / `annual_budgets` / `account_anchors` を D1 に書き込み
-3. `overrides.json` を読んで `overrides` テーブルに書き込み
-4. 取引データは「同期」ボタンで CSV から再取得 (移行不要)
+- `POST /api/admin/migrate/budget` (PR #24): `budget.json` を読んで `members` / `category_order` / `annual_budgets` / `account_anchors` を D1 に書き込み
+- `POST /api/admin/migrate/overrides` (PR-F): `overrides.json` の `byTxId` を読んで、D1 `transactions` から `mf_row_id` で逆引きして `(source_file_id, mf_row_id)` を解決し、`overrides` テーブルに書き込み
+- 取引データ・資産データは「同期」ボタンで CSV から再取得 (移行不要)
 
-安全策:
+各エンドポイントの安全策:
 
-- dry-run でプレビュー
-- D1 に既存データがあれば中断 (上書きしない)
-- `schemaVersion` チェック
+- `dryRun: true` でプレビュー
+- D1 に既存データがあれば 409 を返す (`force: true` で上書き)
+- `schemaVersion` チェック (budget) / `version: 1` チェック (overrides)
 - `account_patterns_json` の型検証
+
+`overrides` 移行で同じ `mf_row_id` が複数 `source_file_id` (重複期間の CSV) に存在する場合は、`csv_files.parsedAt` が最新のものを採用し summary に `ambiguous` カウントとして報告する。
 
 旧 budget.json / overrides.json は Drive 上に残るが、新システムは触らない。不要になったら手動削除。
 
